@@ -5509,13 +5509,36 @@
                   }
                 }
               } else {
-                lastCandle = { time: candleTime, open: lastCandle.close, high: currentPrice, low: currentPrice, close: currentPrice, volume: 0 };
-                localCandles.push(lastCandle);
-                safeUpdateCandle(lastCandle);
-                const newVol = { time: candleTime, value: computeCandleVolume(lastCandle), color: 'rgba(14, 203, 129, 0.5)' };
-                localVolumes.push(newVol);
-                if (indicatorState.volume && volumeHistogramSeries) volumeHistogramSeries.update(newVol);
-                updateIndicators();
+                // FIX: Detect gap between lastCandle and the new candle slot.
+                // A gap means the WS connection missed ticks (tab backgrounded, sleep, network drop).
+                // Without this fix, the new candle opens at the stale lastCandle.close and renders huge.
+                const expectedNextTime = lastCandle.time + currentTimeframe;
+                const gapSlots = Math.round((candleTime - expectedNextTime) / currentTimeframe);
+                if (gapSlots > 0) {
+                  // Gap detected — open new candle at currentPrice (not stale close) so it doesn't render huge,
+                  // and re-subscribe so server re-sends fresh history covering the gap.
+                  lastCandle = { time: candleTime, open: currentPrice, high: currentPrice, low: currentPrice, close: currentPrice, volume: 0 };
+                  localCandles.push(lastCandle);
+                  safeUpdateCandle(lastCandle);
+                  const newVol = { time: candleTime, value: computeCandleVolume(lastCandle), color: 'rgba(14, 203, 129, 0.5)' };
+                  localVolumes.push(newVol);
+                  if (indicatorState.volume && volumeHistogramSeries) volumeHistogramSeries.update(newVol);
+                  updateIndicators();
+                  try {
+                    if (socket && socket.readyState === WebSocket.OPEN) {
+                      socket.send(JSON.stringify({ type: "subscribe", pair: selectedPair, timeframe: currentTimeframe }));
+                    }
+                  } catch(e) { console.warn('gap re-subscribe failed', e); }
+                } else {
+                  // Normal next-candle rollover (no gap).
+                  lastCandle = { time: candleTime, open: lastCandle.close, high: currentPrice, low: currentPrice, close: currentPrice, volume: 0 };
+                  localCandles.push(lastCandle);
+                  safeUpdateCandle(lastCandle);
+                  const newVol = { time: candleTime, value: computeCandleVolume(lastCandle), color: 'rgba(14, 203, 129, 0.5)' };
+                  localVolumes.push(newVol);
+                  if (indicatorState.volume && volumeHistogramSeries) volumeHistogramSeries.update(newVol);
+                  updateIndicators();
+                }
               }
             }
           }
@@ -5579,9 +5602,24 @@
             if (last.time >= currentCandleTime) {
               lastCandle = last;
             } else {
+              // FIX: Last historical candle is older than current slot — there's a gap.
+              // Create a stub candle at the current slot using last.close, and also
+              // push a matching volume entry + update volume series so they stay in sync.
               lastCandle = { time: currentCandleTime, open: last.close, high: last.close, low: last.close, close: last.close, volume: 0 };
-              safeUpdateCandle(lastCandle);
               localCandles.push(lastCandle);
+              safeUpdateCandle(lastCandle);
+              const stubVol = { time: currentCandleTime, value: 0, color: 'rgba(14, 203, 129, 0.5)' };
+              localVolumes.push(stubVol);
+              if (indicatorState.volume && volumeHistogramSeries) volumeHistogramSeries.update(stubVol);
+              // If the gap is more than 1 slot, re-subscribe so server re-sends fresh history to fill it.
+              const gapSlots = Math.round((currentCandleTime - last.time) / currentTimeframe);
+              if (gapSlots > 1) {
+                try {
+                  if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ type: "subscribe", pair: selectedPair, timeframe: currentTimeframe }));
+                  }
+                } catch(e) { console.warn('history gap re-subscribe failed', e); }
+              }
             }
             marketPrices[selPairNorm] = lastCandle.close;
             $('priceDisplay').textContent = formatPrice(lastCandle.close);

@@ -5817,3 +5817,1266 @@
 
       html += `<div class="ob-spread-row">`
         +     `<div class="ob-spread-price ${priceCl
+s}"><span>${lastPxText}</span><span class="ob-spread-arrow">${arrow}</span></div>`
+        +     `<div class="ob-spread-mid">Mid<span class="ob-spread-mid-val">${midText}</span></div>`
+        +     `<div class="ob-spread-pct" title="Spread">${spreadPctText}</div>`
+        +   `</div>`;
+
+      // Bids: render descending (high price first)
+      for (let i = 0; i < bidWithCum.length; i++) {
+        const level = bidWithCum[i];
+        const widthPct = Math.min(100, (level.cum / maxBidCum) * 100);
+        const isBest = i === 0;
+        html += `<div class="ob-row${isBest ? ' ob-row-best' : ''}">`
+          +    `<div class="ob-bg bg-green" style="width:${widthPct}%"></div>`
+          +    `<span class="text-green">${formatPrice(level.price)}</span>`
+          +    `<span>${level.size.toFixed(5)}</span>`
+          +    `<span>${level.cum.toFixed(3)}</span>`
+          +  `</div>`;
+      }
+
+      container.innerHTML = html;
+
+      // ---- Bid/Ask ratio bar (bottom of the order book) ----
+      const totalBids = bidWithCum.reduce((acc, l) => acc + l.size, 0);
+      const totalAsks = askWithCum.reduce((acc, l) => acc + l.size, 0);
+      const totalAll  = totalBids + totalAsks;
+      const bidPct = totalAll > 0 ? (totalBids / totalAll) * 100 : 50;
+      const askPct = 100 - bidPct;
+      const bidFillEl = $('ratioBidFill');
+      const askFillEl = $('ratioAskFill');
+      const bidLabelEl = $('ratioBidLabel');
+      const askLabelEl = $('ratioAskLabel');
+      if (bidFillEl) bidFillEl.style.width = bidPct.toFixed(1) + '%';
+      if (askFillEl) askFillEl.style.width = askPct.toFixed(1) + '%';
+      if (bidLabelEl) bidLabelEl.textContent = 'B ' + bidPct.toFixed(1) + '%';
+      if (askLabelEl) askLabelEl.textContent = askPct.toFixed(1) + '% S';
+
+      const updEl = $('bookUpdated');
+      if (updEl) updEl.textContent = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    function renderTrades(trades) {
+      const el = $('tradeHistory');
+      if (!Array.isArray(trades) || !el) return;
+      const limit = clampValue(Number(layoutState.maxTrades) || 3, 3, 16);
+      const list = trades.slice(0, limit);
+      let html = "";
+      list.forEach(t => {
+        const color = t.side === 'buy' ? 'text-green' : 'text-red';
+        const timeStr = new Date(t.time).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        html += `<div class="ob-row"><span class="${color}">${formatPrice(t.price)}</span><span class="trade-time">${timeStr}</span></div>`;
+      });
+      el.innerHTML = html;
+    }
+
+    async function openPosition(type) {
+      const marginInput = $('sizeInput').value;
+      const margin = Number(marginInput);
+      const currentPrice = marketPrices[selectedPair];
+
+      if (!margin || margin <= 0) return showToast("Enter margin", "error");
+      if (!currentPrice) return showToast("Waiting for price...", "error");
+
+      const account = buildLocalAccountSnapshot();
+      const capacity = profile.marginMode === 'cross' ? account.availableMargin : profile.balance;
+      if (margin > capacity) return showToast("Insufficient margin", "error");
+      if (profile.marginMode === 'cross' && account.riskLevel >= 85) {
+        const proceed = confirm(`Account risk is ${account.riskLevel.toFixed(1)}%. Continue opening a new position?`);
+        if (!proceed) return;
+      }
+
+      const size = margin * currentLeverage;
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+
+      // --- OPTIMISTIC UI: Создаем временную позицию ---
+      const tempId = 'temp-' + Date.now();
+      const tempPosition = {
+        id: tempId,
+        _id: tempId,
+        pair: selectedPair,
+        type: type,
+        entry_price: currentPrice,
+        margin: margin,
+        leverage: currentLeverage,
+        size: size,
+        isOptimistic: true
+      };
+
+      // 1. Мгновенно обновляем UI
+      window._positions.unshift(tempPosition);
+
+      // Сохраняем старый баланс для отката
+      const oldBalance = profile.balance;
+      profile.balance -= margin;
+      updateBalanceUI();
+
+      renderPositions(true);
+
+      // Скроллим к новой позиции
+      const newEl = document.getElementById('pos-item-' + tempId);
+      if (newEl) newEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+      try {
+        const res = await authFetch(API_BASE + "/api/order/open", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pair: selectedPair,
+            type,
+            size,
+            leverage: currentLeverage,
+            entryPrice: currentPrice,
+            idempotencyKey: tempId
+          })
+        });
+
+        const data = await res.json();
+
+        if (data.ok) {
+          // 2. Успех: заменяем временную позицию на настоящую
+          window._positions = window._positions.filter(p => p.id !== tempId && p._id !== tempId);
+          window._positions.push(data.position);
+
+          // Обновляем точный баланс с сервера
+          if (data.newBalance !== undefined) {
+            profile.balance = data.newBalance;
+            updateBalanceUI();
+          }
+
+          renderPositions(true);
+          showToast(`${type} position opened`, 'success');
+          if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+        } else {
+          throw new Error(data.error || "Unknown error");
+        }
+      } catch (e) {
+        // 3. Ошибка: откатываем UI назад
+        console.error(e);
+
+        // Удаляем оптимистичную позицию
+        window._positions = window._positions.filter(p => p.id !== tempId && p._id !== tempId);
+        // Возвращаем баланс
+        profile.balance = oldBalance;
+
+        updateBalanceUI();
+        renderPositions(true);
+
+        showToast(e.message || "Network error", "error");
+        if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
+      }
+    }
+
+    async function closePosition(id, pair) {
+      const pos = window._positions.find(p => (p.id == id || p._id == id));
+      if (!pos) return;
+      const closePrice = marketPrices[pair || pos.pair];
+      if (!closePrice) return showToast("Price not available for " + pair, "error");
+      if (!confirm("Close position?")) return;
+      try {
+        const res = await authFetch(API_BASE + "/api/order/close", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ positionId: id, closePrice: closePrice })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          window._positions = window._positions.filter(p => (p.id != id && p._id != id));
+          window._tpSlOrders = window._tpSlOrders.filter(o => String(o.position_id) !== String(id));
+          if (data.newBalance) {
+            profile.balance = data.newBalance;
+            updateBalanceUI();
+          }
+          const el = document.getElementById('pos-item-' + id);
+          if (el) el.remove();
+          renderPositions(false);
+          if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+          showToast("Position closed", "success");
+        }
+      } catch (e) {
+        console.error(e);
+        showToast("Network error", "error");
+      }
+    }
+
+    // ===== ORDER TYPE SELECTOR =====
+    function initOrderTypeSelector() {
+        document.querySelectorAll('#orderTypeSelector .order-type-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('#orderTypeSelector .order-type-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentOrderType = btn.dataset.type;
+                const limitGroup = $('limitPriceGroup');
+                if (currentOrderType === 'limit') {
+                    limitGroup.classList.add('visible');
+                    const cp = marketPrices[selectedPair];
+                    if (cp) $('limitMarketPrice').textContent = formatPrice(cp);
+                } else {
+                    limitGroup.classList.remove('visible');
+                }
+                if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+            });
+        });
+    }
+
+    // ===== LIMIT ORDERS =====
+    async function createLimitOrder(type) {
+        const marginInput = $('sizeInput').value;
+        const margin = Number(marginInput);
+        const limitPrice = Number($('limitPriceInput').value);
+        const currentPrice = marketPrices[selectedPair];
+
+        if (!margin || margin <= 0) return showToast("Enter margin", "error");
+        if (!limitPrice || limitPrice <= 0) return showToast("Enter limit price", "error");
+        if (!currentPrice) return showToast("Waiting for price...", "error");
+        if (margin > profile.balance) return showToast("Insufficient balance", "error");
+
+        // Validate limit price direction
+        if (type === 'LONG' && limitPrice >= currentPrice) {
+            return showToast("Limit Long price must be below market", "error");
+        }
+        if (type === 'SHORT' && limitPrice <= currentPrice) {
+            return showToast("Limit Short price must be above market", "error");
+        }
+
+        const size = margin * currentLeverage;
+        if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+
+        // Optimistic UI
+        const tempId = 'temp-limit-' + Date.now();
+        const tempOrder = {
+            id: tempId, pair: selectedPair, type: type,
+            limit_price: limitPrice, margin: margin,
+            leverage: currentLeverage, size: size,
+            status: 'PENDING', created_at: new Date().toISOString()
+        };
+        window._limitOrders.unshift(tempOrder);
+        const oldBalance = profile.balance;
+        profile.balance -= margin;
+        updateBalanceUI();
+        renderLimitOrders();
+
+        try {
+            const res = await authFetch(API_BASE + "/api/limit-order/create", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    pair: selectedPair, type: type,
+                    limitPrice: limitPrice, margin: margin,
+                    leverage: currentLeverage, size: size
+                })
+            });
+            const data = await res.json();
+            if (data.ok) {
+                window._limitOrders = window._limitOrders.filter(o => o.id !== tempId);
+                window._limitOrders.unshift(data.order);
+                if (data.newBalance !== undefined) {
+                    profile.balance = data.newBalance;
+                    updateBalanceUI();
+                }
+                renderLimitOrders();
+                showToast(`Limit ${type} order placed at ${formatPrice(limitPrice)}`, 'success');
+                if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+            } else {
+                throw new Error(data.error || "Unknown error");
+            }
+        } catch (e) {
+            console.error(e);
+            window._limitOrders = window._limitOrders.filter(o => o.id !== tempId);
+            profile.balance = oldBalance;
+            updateBalanceUI();
+            renderLimitOrders();
+            showToast(e.message || "Network error", "error");
+            if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
+        }
+    }
+
+    async function cancelLimitOrder(orderId) {
+        try {
+            const res = await authFetch(API_BASE + "/api/limit-order/cancel", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ orderId: orderId })
+            });
+            const data = await res.json();
+            if (data.ok) {
+                window._limitOrders = window._limitOrders.filter(o => String(o.id) !== String(orderId));
+                if (data.newBalance !== undefined) {
+                    profile.balance = data.newBalance;
+                    updateBalanceUI();
+                }
+                renderLimitOrders();
+                if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+                showToast("Limit order cancelled", "success");
+            } else {
+                showToast(data.error || "Failed to cancel", "error");
+            }
+        } catch (e) {
+            console.error(e);
+            showToast("Network error", "error");
+        }
+    }
+
+    function renderLimitOrders() {
+        const list = $('limitOrdersList');
+        const emptyEl = $('ordersEmptyState');
+        const countEl = $('ordersCount');
+        const pending = (window._limitOrders || []).filter(o => o.status === 'PENDING');
+
+        if (countEl) countEl.textContent = pending.length;
+
+        if (pending.length === 0) {
+            list.innerHTML = '';
+            if (emptyEl) emptyEl.style.display = 'flex';
+            return;
+        }
+
+        if (emptyEl) emptyEl.style.display = 'none';
+        list.innerHTML = '';
+
+        pending.forEach(order => {
+            const id = String(order.id);
+            const type = (order.type || 'LONG').toUpperCase();
+            const pair = normalizePair(order.pair || 'BTC-USDT');
+            const limitPrice = Number(order.limit_price);
+            const margin = Number(order.margin);
+            const size = Number(order.size);
+            const lev = Number(order.leverage || 1);
+            const currentPrice = marketPrices[pair];
+            const distPct = currentPrice ? (((limitPrice - currentPrice) / currentPrice) * 100).toFixed(2) : '--';
+
+            const div = document.createElement('div');
+            div.className = `limit-order-item ${type === 'LONG' ? 'long-order' : 'short-order'}`;
+            div.id = 'limit-order-' + id;
+
+            div.innerHTML = `
+                <div class="limit-order-header">
+                    <div class="limit-order-left">
+                        <span class="pos-type-tag ${type === 'LONG' ? 'long-tag' : 'short-tag'}">${type}</span>
+                        <span class="pos-pair-text">${pair}</span>
+                        <span class="pos-lev-text">×${lev}</span>
+                    </div>
+                    <span class="limit-order-status">⏳ Pending</span>
+                </div>
+                <div class="limit-order-grid">
+                    <div class="limit-order-stat">
+                        <span class="limit-order-stat-label">Limit Price</span>
+                        <span class="limit-order-stat-val" style="color: var(--gold);">${formatPrice(limitPrice)}</span>
+                    </div>
+                    <div class="limit-order-stat" style="align-items: center;">
+                        <span class="limit-order-stat-label">Size</span>
+                        <span class="limit-order-stat-val">${size.toFixed(0)} VP</span>
+                    </div>
+                    <div class="limit-order-stat" style="align-items: flex-end;">
+                        <span class="limit-order-stat-label">Distance</span>
+                        <span class="limit-order-stat-val" id="limit-dist-${id}">${distPct}%</span>
+                    </div>
+                </div>
+                <div class="limit-order-grid" style="border-top: none; padding-top: 0;">
+                    <div class="limit-order-stat">
+                        <span class="limit-order-stat-label">Margin</span>
+                        <span class="limit-order-stat-val">${margin.toFixed(2)} VP</span>
+                    </div>
+                    <div class="limit-order-stat" style="align-items: center;">
+                        <span class="limit-order-stat-label">Market Price</span>
+                        <span class="limit-order-stat-val" id="limit-market-${id}">${currentPrice ? formatPrice(currentPrice) : '--.--'}</span>
+                    </div>
+                    <div class="limit-order-stat" style="align-items: flex-end;">
+                        <span class="limit-order-stat-label">Created</span>
+                        <span class="limit-order-stat-val" style="font-size: 10px;">${new Date(order.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span>
+                    </div>
+                </div>
+                <button class="limit-order-cancel" data-order-id="${id}">Cancel Order</button>
+            `;
+
+            list.appendChild(div);
+            div.querySelector('.limit-order-cancel').addEventListener('click', () => cancelLimitOrder(id));
+        });
+    }
+
+    // Update limit order distances dynamically
+    function updateLimitOrdersDynamic() {
+        const pending = (window._limitOrders || []).filter(o => o.status === 'PENDING');
+        pending.forEach(order => {
+            const id = String(order.id);
+            const pair = normalizePair(order.pair || 'BTC-USDT');
+            const currentPrice = marketPrices[pair];
+            if (!currentPrice) return;
+            const limitPrice = Number(order.limit_price);
+            const distPct = (((limitPrice - currentPrice) / currentPrice) * 100).toFixed(2);
+            const distEl = document.getElementById(`limit-dist-${id}`);
+            const marketEl = document.getElementById(`limit-market-${id}`);
+            if (distEl) distEl.textContent = distPct + '%';
+            if (marketEl) marketEl.textContent = formatPrice(currentPrice);
+        });
+    }
+
+    $('openLong').onclick = () => {
+        if (currentOrderType === 'limit') createLimitOrder("LONG");
+        else openPosition("LONG");
+    };
+    $('openShort').onclick = () => {
+        if (currentOrderType === 'limit') createLimitOrder("SHORT");
+        else openPosition("SHORT");
+    };
+
+    const loaderEl = $('app-loader');
+    const loaderBar = $('loaderBar');
+
+    function setProgress(pct, txt) {
+      loaderBar.style.width = pct + '%';
+      $('loaderText').textContent = txt;
+    }
+
+    setProgress(20, "AUTH...");
+    await initSession();
+
+    setProgress(40, "ADSGRAM...");
+    initAdsgram();
+
+    setProgress(50, "TOOLS...");
+    initDrawingTools();
+    initIndicatorChips();
+    initPriceAlertsUI();
+    initPnlModal();
+    initTpSlModal();
+
+    // ===== Positions / Orders tab switching =====
+    function initPosTabs() {
+      document.querySelectorAll('.pos-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+          document.querySelectorAll('.pos-tab').forEach(t => t.classList.remove('active'));
+          document.querySelectorAll('.pos-tab-panel').forEach(p => p.classList.remove('active'));
+          tab.classList.add('active');
+          const tabName = tab.dataset.tab;
+          const panelId = 'panel' + tabName.charAt(0).toUpperCase() + tabName.slice(1);
+          const panel = $(panelId);
+          if (panel) panel.classList.add('active');
+          if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+        });
+      });
+    }
+    initPosTabs();
+    initOrderTypeSelector();
+    setupDoubleTapHandler();
+
+    setProgress(60, "STREAM...");
+    connectWS();
+
+    await Promise.race([new Promise(r => historyResolve = r), new Promise(r => setTimeout(r, 4000))]);
+    setProgress(100, "READY");
+
+    setTimeout(() => { checkResponsiveOverflows(); }, 100);
+
+    setTimeout(() => {
+      loaderEl.classList.add('hidden');
+      setTimeout(() => loaderEl.style.display = 'none', 400);
+    }, 500);
+
+  // ========== MARKET DEPTH ==========
+
+const depthState = {
+  view: 'book', // 'book' | 'depth'
+  zoom: 1.0,
+  minZoom: 0.3,
+  maxZoom: 3.0,
+  zoomStep: 0.25,
+  lastBids: [],
+  lastAsks: [],
+  animFrame: null,
+  hoveredSide: null,
+  hoveredPrice: null,
+  hoveredIndex: null,
+};
+
+function initDepthTabs() {
+  const tabBook = $('tabOrderBook');
+  const tabDepth = $('tabDepthChart');
+  const bookWrapper = $('obBookWrapper');
+  const depthWrapper = $('depthChartWrapper');
+  const titleEl = $('obCardTitle');
+
+  tabBook.addEventListener('click', () => {
+    depthState.view = 'book';
+    tabBook.classList.add('active');
+    tabDepth.classList.remove('active');
+    bookWrapper.classList.remove('hidden');
+    depthWrapper.classList.remove('visible');
+    titleEl.textContent = 'Order Book';
+    scheduleCompactLayoutSync();
+    if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+  });
+
+  tabDepth.addEventListener('click', () => {
+    depthState.view = 'depth';
+    tabDepth.classList.add('active');
+    tabBook.classList.remove('active');
+    bookWrapper.classList.add('hidden');
+    depthWrapper.classList.add('visible');
+    titleEl.textContent = 'Market Depth';
+    scheduleCompactLayoutSync();
+    requestAnimationFrame(() => {
+      resizeDepthCanvas();
+      renderDepthChart();
+    });
+    if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+  });
+
+  $('depthZoomIn').addEventListener('click', () => {
+    depthState.zoom = Math.min(depthState.maxZoom, depthState.zoom + depthState.zoomStep);
+    renderDepthChart();
+    if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+  });
+  $('depthZoomOut').addEventListener('click', () => {
+    depthState.zoom = Math.max(depthState.minZoom, depthState.zoom - depthState.zoomStep);
+    renderDepthChart();
+    if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+  });
+
+  setupDepthCanvasInteraction();
+  setupDepthResizeObserver();
+  setupCompactLayoutObserver();
+  syncCompactRightColumnLayout();
+}
+
+function resizeDepthCanvas() {
+  const canvas = $('depthCanvas');
+  if (!canvas) return;
+  const container = canvas.parentElement;
+  const dpr = window.devicePixelRatio || 1;
+  const w = container.clientWidth;
+  const h = container.clientHeight || 220;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+}
+
+function setupDepthResizeObserver() {
+  const wrapper = $('depthChartWrapper');
+  if (!wrapper) return;
+  new ResizeObserver(() => {
+    if (depthState.view === 'depth') {
+      resizeDepthCanvas();
+      renderDepthChart();
+    }
+  }).observe(wrapper);
+}
+
+function buildCumulativeDepth(levels, isBid) {
+  if (!levels || levels.length === 0) return [];
+  const sorted = [...levels].sort((a, b) => isBid ? b.price - a.price : a.price - b.price);
+  let cum = 0;
+  return sorted.map(l => {
+    cum += l.size;
+    return { price: l.price, size: l.size, cumSize: cum };
+  });
+}
+
+function renderDepthChart() {
+  const canvas = $('depthCanvas');
+  if (!canvas || depthState.view !== 'depth') return;
+
+  const { lastBids, lastAsks } = depthState;
+  if (lastBids.length === 0 && lastAsks.length === 0) {
+    drawDepthEmpty(canvas);
+    return;
+  }
+
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.width / dpr;
+  const H = canvas.height / dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  // Сортируем все уровни
+  const sortedBids = [...lastBids].sort((a, b) => b.price - a.price); // от высокой к низкой
+  const sortedAsks = [...lastAsks].sort((a, b) => a.price - b.price); // от низкой к высокой
+
+  if (sortedBids.length === 0 || sortedAsks.length === 0) {
+    drawDepthEmpty(canvas);
+    return;
+  }
+
+  const bestBid = sortedBids[0].price;
+  const bestAsk = sortedAsks[0].price;
+  const midPrice = (bestBid + bestAsk) / 2;
+  const spread = bestAsk - bestBid;
+
+  // Берём реальный диапазон уровней стакана
+  const lowestBid = sortedBids[sortedBids.length - 1].price;
+  const highestAsk = sortedAsks[sortedAsks.length - 1].price;
+  const fullRange = highestAsk - lowestBid;
+
+  const baseHalfRange = fullRange / 2;
+  const halfRange = baseHalfRange / depthState.zoom;
+  const priceMin = midPrice - halfRange;
+  const priceMax = midPrice + halfRange;
+
+  // Видимые уровни в диапазоне
+  const visibleBidLevels = sortedBids.filter(b => b.price >= priceMin);
+  const visibleAskLevels = sortedAsks.filter(a => a.price <= priceMax);
+
+  // Кумулятивная глубина для видимых уровней
+  let bidCum = 0;
+  const bidPoints = visibleBidLevels.map(l => {
+    bidCum += l.size;
+    return { price: l.price, size: l.size, cumSize: bidCum };
+  });
+  let askCum = 0;
+  const askPoints = visibleAskLevels.map(l => {
+    askCum += l.size;
+    return { price: l.price, size: l.size, cumSize: askCum };
+  });
+
+  if (bidPoints.length === 0 && askPoints.length === 0) {
+    drawDepthEmpty(canvas);
+    return;
+  }
+
+  const totalBidsVol = bidPoints.length ? bidPoints[bidPoints.length - 1].cumSize : 0;
+  const totalAsksVol = askPoints.length ? askPoints[askPoints.length - 1].cumSize : 0;
+
+  const maxCum = Math.max(totalBidsVol, totalAsksVol, 0.0001);
+
+  const PAD_TOP = 22;
+  const PAD_BOTTOM = 26;
+  const PAD_LEFT = 6;
+  const PAD_RIGHT = 46; // volume axis on the right (tier-1 style)
+  const chartH = H - PAD_TOP - PAD_BOTTOM;
+  const chartW = W - PAD_LEFT - PAD_RIGHT;
+
+  const priceToX = (p) => PAD_LEFT + ((p - priceMin) / (priceMax - priceMin)) * chartW;
+  const volToY = (v) => PAD_TOP + chartH - (v / maxCum) * chartH;
+
+  // --- Фон ---
+  ctx.fillStyle = '#0b0e11';
+  ctx.fillRect(0, 0, W, H);
+
+  // --- Тонкая сетка (горизонтальная + вертикальная) ---
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) {
+    const y = PAD_TOP + (chartH / 4) * i;
+    ctx.beginPath(); ctx.moveTo(PAD_LEFT, y); ctx.lineTo(W - PAD_RIGHT, y); ctx.stroke();
+  }
+  for (let i = 1; i < 6; i++) {
+    const x = PAD_LEFT + (chartW / 6) * i;
+    ctx.beginPath(); ctx.moveTo(x, PAD_TOP); ctx.lineTo(x, H - PAD_BOTTOM); ctx.stroke();
+  }
+
+  const midX = priceToX(midPrice);
+
+  // --- Spread zone (subtle highlight between bestBid and bestAsk) ---
+  const bestBidX = priceToX(bestBid);
+  const bestAskX = priceToX(bestAsk);
+  if (bestAskX > bestBidX) {
+    ctx.fillStyle = 'rgba(240, 185, 11, 0.06)';
+    ctx.fillRect(bestBidX, PAD_TOP, bestAskX - bestBidX, chartH);
+  }
+
+  // ---- Helper: build step-area path ----
+  const drawStepArea = (points, isBid) => {
+    if (!points.length) return;
+    const sortedForDraw = [...points].sort((a, b) => a.price - b.price); // low → high
+    const baseY = PAD_TOP + chartH;
+
+    // Bid side path goes left-to-right (low → bestBid)
+    // Ask side path goes left-to-right (bestAsk → high)
+    // The same step logic works for both.
+
+    // Build cumulative-by-price map for quick lookup
+    ctx.beginPath();
+    ctx.moveTo(priceToX(sortedForDraw[0].price), baseY);
+
+    // For asks the cumulative grows from low → high (best ask cum = its size, then more).
+    // For bids the cumulative grows from high → low. We pass `points` already cumulated
+    // outward from the spread; sortedForDraw reorders by price so we need the cum value
+    // associated with each price.
+    const cumByPrice = new Map(points.map(p => [p.price, p.cumSize]));
+
+    let prevX = priceToX(sortedForDraw[0].price);
+    let prevY = volToY(cumByPrice.get(sortedForDraw[0].price));
+    ctx.lineTo(prevX, prevY);
+
+    for (let i = 1; i < sortedForDraw.length; i++) {
+      const p = sortedForDraw[i];
+      const x = priceToX(p.price);
+      const y = volToY(cumByPrice.get(p.price));
+      ctx.lineTo(x, prevY);
+      ctx.lineTo(x, y);
+      prevX = x; prevY = y;
+    }
+    ctx.lineTo(priceToX(sortedForDraw[sortedForDraw.length - 1].price), baseY);
+    ctx.closePath();
+
+    // Gradient fill — slightly stronger near the spread, softer at the edges
+    let fill;
+    if (isBid) {
+      fill = ctx.createLinearGradient(PAD_LEFT, 0, midX, 0);
+      fill.addColorStop(0, 'rgba(14, 203, 129, 0.04)');
+      fill.addColorStop(0.6, 'rgba(14, 203, 129, 0.18)');
+      fill.addColorStop(1, 'rgba(14, 203, 129, 0.34)');
+    } else {
+      fill = ctx.createLinearGradient(midX, 0, W - PAD_RIGHT, 0);
+      fill.addColorStop(0, 'rgba(246, 70, 93, 0.34)');
+      fill.addColorStop(0.4, 'rgba(246, 70, 93, 0.18)');
+      fill.addColorStop(1, 'rgba(246, 70, 93, 0.04)');
+    }
+    ctx.fillStyle = fill;
+    ctx.fill();
+
+    // Outline (step)
+    ctx.beginPath();
+    prevY = volToY(cumByPrice.get(sortedForDraw[0].price));
+    ctx.moveTo(priceToX(sortedForDraw[0].price), baseY);
+    ctx.lineTo(priceToX(sortedForDraw[0].price), prevY);
+    for (let i = 1; i < sortedForDraw.length; i++) {
+      const p = sortedForDraw[i];
+      const x = priceToX(p.price);
+      const y = volToY(cumByPrice.get(p.price));
+      ctx.lineTo(x, prevY);
+      ctx.lineTo(x, y);
+      prevY = y;
+    }
+    ctx.strokeStyle = isBid ? 'rgba(14, 203, 129, 0.95)' : 'rgba(246, 70, 93, 0.95)';
+    ctx.lineWidth = 1.6;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.stroke();
+  };
+
+  drawStepArea(bidPoints, true);
+  drawStepArea(askPoints, false);
+
+  // --- Best bid / best ask vertical markers ---
+  ctx.save();
+  ctx.setLineDash([2, 3]);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(14, 203, 129, 0.55)';
+  ctx.beginPath(); ctx.moveTo(bestBidX, PAD_TOP); ctx.lineTo(bestBidX, H - PAD_BOTTOM); ctx.stroke();
+  ctx.strokeStyle = 'rgba(246, 70, 93, 0.55)';
+  ctx.beginPath(); ctx.moveTo(bestAskX, PAD_TOP); ctx.lineTo(bestAskX, H - PAD_BOTTOM); ctx.stroke();
+  ctx.restore();
+
+  // --- Mid-price vertical guide ---
+  ctx.save();
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = 'rgba(240, 185, 11, 0.45)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(midX, PAD_TOP); ctx.lineTo(midX, H - PAD_BOTTOM); ctx.stroke();
+  ctx.restore();
+
+  // --- Mid-price label (Binance-style pill on top of the chart) ---
+  const labelW = Math.min(96, Math.max(64, W * 0.22));
+  const labelH = 16;
+  if (ctx.roundRect) {
+    ctx.fillStyle = 'rgba(240, 185, 11, 0.92)';
+    ctx.beginPath();
+    ctx.roundRect(midX - labelW / 2, 2, labelW, labelH, 4);
+    ctx.fill();
+  } else {
+    ctx.fillStyle = 'rgba(240, 185, 11, 0.92)';
+    ctx.fillRect(midX - labelW / 2, 2, labelW, labelH);
+  }
+  ctx.fillStyle = '#0b0e11';
+  ctx.font = 'bold 10px "Roboto Mono", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(formatPrice(midPrice), midX, 2 + labelH / 2 + 0.5);
+
+  // --- Volume axis labels (right side, tier-1 style) ---
+  ctx.fillStyle = 'rgba(132,142,156,0.6)';
+  ctx.font = '9px "Roboto Mono", monospace';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  for (let i = 1; i <= 4; i++) {
+    const v = (maxCum / 4) * i;
+    const y = volToY(v);
+    if (y < PAD_TOP + 4 || y > H - PAD_BOTTOM - 4) continue;
+    ctx.fillText(formatVolume(v), W - PAD_RIGHT + 4, y);
+  }
+
+  // --- Price axis labels (bottom) ---
+  ctx.fillStyle = 'rgba(132,142,156,0.7)';
+  ctx.font = '9px "Roboto Mono", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (let i = 0; i <= 6; i++) {
+    const p = priceMin + (priceMax - priceMin) * (i / 6);
+    const x = priceToX(p);
+    if (x < PAD_LEFT + 14 || x > W - PAD_RIGHT - 14) continue;
+    ctx.fillText(formatPrice(p), x, H - PAD_BOTTOM + 4);
+  }
+
+  // --- Hover tooltip ---
+  if (depthState.hoveredPrice !== null) {
+    renderDepthHover(ctx, W, H, PAD_TOP, PAD_BOTTOM, PAD_LEFT, PAD_RIGHT, chartH, chartW,
+      bidPoints, askPoints, priceMin, priceMax, maxCum, midPrice);
+  }
+
+  // --- Info bar update ---
+  const spreadPct = midPrice > 0 ? ((spread / midPrice) * 100).toFixed(3) : '0.000';
+  const spreadValEl = $('depthSpreadVal');
+  const spreadPctEl = $('depthSpreadPct');
+  const midPriceEl  = $('depthMidPrice');
+  const bidsTotalEl = $('depthBidsTotal');
+  const asksTotalEl = $('depthAsksTotal');
+  if (spreadValEl) spreadValEl.textContent = formatPrice(spread);
+  if (spreadPctEl) spreadPctEl.textContent = spreadPct + '%';
+  if (midPriceEl)  midPriceEl.textContent  = formatPrice(midPrice);
+  if (bidsTotalEl) bidsTotalEl.textContent = formatVolume(totalBidsVol);
+  if (asksTotalEl) asksTotalEl.textContent = formatVolume(totalAsksVol);
+}
+
+function renderDepthHover(ctx, W, H, PAD_TOP, PAD_BOTTOM, PAD_LEFT, PAD_RIGHT, chartH, chartW,
+  bidPoints, askPoints, priceMin, priceMax, maxCum, midPrice) {
+  if (depthState.hoveredPrice === null) return;
+
+  const priceToX = (p) => PAD_LEFT + ((p - priceMin) / (priceMax - priceMin)) * chartW;
+  const volToY = (v) => PAD_TOP + chartH - (v / maxCum) * chartH;
+  const x = priceToX(depthState.hoveredPrice);
+
+  if (x < PAD_LEFT || x > W - PAD_RIGHT) return;
+
+  // Вертикальная линия
+  ctx.save();
+  ctx.setLineDash([3, 3]);
+  ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, PAD_TOP);
+  ctx.lineTo(x, H - PAD_BOTTOM);
+  ctx.stroke();
+  ctx.restore();
+
+  // Найти ближайший уровень
+  const isBidSide = depthState.hoveredPrice <= midPrice;
+  const levels = isBidSide
+    ? [...bidPoints].sort((a, b) => b.price - a.price)
+    : [...askPoints].sort((a, b) => a.price - b.price);
+
+  if (levels.length === 0) return;
+
+  let closest = levels[0];
+  for (const l of levels) {
+    if (Math.abs(l.price - depthState.hoveredPrice) < Math.abs(closest.price - depthState.hoveredPrice)) {
+      closest = l;
+    }
+  }
+
+  const dotX = priceToX(closest.price);
+  const dotY = volToY(closest.cumSize);
+
+  // Точка
+  ctx.beginPath();
+  ctx.arc(dotX, dotY, 4, 0, Math.PI * 2);
+  ctx.fillStyle = isBidSide ? '#0ECB81' : '#F6465D';
+  ctx.fill();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Тултип
+  const tooltip = $('depthTooltip');
+  const canvas = $('depthCanvas');
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+
+  const tooltipX = dotX + 12;
+  const tooltipY = Math.max(4, dotY - 30);
+
+  tooltip.style.left = (tooltipX > W * 0.65 ? dotX - 155 : dotX + 12) + 'px';
+  tooltip.style.top = tooltipY + 'px';
+  tooltip.classList.add('visible');
+
+  $('depthTooltipPrice').textContent = formatPrice(closest.price);
+  $('depthTooltipPrice').style.color = isBidSide ? '#0ECB81' : '#F6465D';
+  $('depthTooltipVol').textContent = formatVolume(closest.size);
+  $('depthTooltipTotal').textContent = formatVolume(closest.cumSize);
+  $('depthTooltipSide').textContent = isBidSide ? 'Bid' : 'Ask';
+  $('depthTooltipSide').style.color = isBidSide ? '#0ECB81' : '#F6465D';
+}
+
+function drawDepthEmpty(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.width / dpr;
+  const H = canvas.height / dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0d1014';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(132,142,156,0.4)';
+  ctx.font = '12px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Waiting for order book data...', W / 2, H / 2);
+}
+
+function setupDepthCanvasInteraction() {
+  const canvas = $('depthCanvas');
+  if (!canvas) return;
+
+  const getPrice = (clientX) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const W = rect.width;
+    const PAD_LEFT = 6, PAD_RIGHT = 6;
+    const chartW = W - PAD_LEFT - PAD_RIGHT;
+
+    const { lastBids, lastAsks } = depthState;
+    if (!lastBids.length && !lastAsks.length) return null;
+
+    const bestBid = lastBids.length ? Math.max(...lastBids.map(b => b.price)) : 0;
+    const bestAsk = lastAsks.length ? Math.min(...lastAsks.map(a => a.price)) : 0;
+    const midPrice = (bestBid + bestAsk) / 2;
+    const halfSpread = (bestAsk - bestBid) / 2;
+    const basePriceRange = Math.max(midPrice * 0.015, halfSpread * 10);
+    const priceRange = basePriceRange / depthState.zoom;
+    const priceMin = midPrice - priceRange;
+    const priceMax = midPrice + priceRange;
+
+    return priceMin + ((x - PAD_LEFT) / chartW) * (priceMax - priceMin);
+  };
+
+  canvas.addEventListener('mousemove', (e) => {
+    depthState.hoveredPrice = getPrice(e.clientX);
+    if (depthState.view === 'depth') renderDepthChart();
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    depthState.hoveredPrice = null;
+    $('depthTooltip').classList.remove('visible');
+    if (depthState.view === 'depth') renderDepthChart();
+  });
+
+  canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    if (e.touches.length > 0) {
+      depthState.hoveredPrice = getPrice(e.touches[0].clientX);
+      if (depthState.view === 'depth') renderDepthChart();
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', () => {
+    depthState.hoveredPrice = null;
+    $('depthTooltip').classList.remove('visible');
+    if (depthState.view === 'depth') renderDepthChart();
+  });
+
+  // Zoom колесом мыши
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -depthState.zoomStep : depthState.zoomStep;
+    depthState.zoom = Math.max(depthState.minZoom, Math.min(depthState.maxZoom, depthState.zoom + delta));
+    renderDepthChart();
+  }, { passive: false });
+}
+
+// Единая функция, вызывающая и стакан, и depth
+function renderOrderBook(buys, sells) {
+  // Кэшируем для перерисовки при смене ориентации
+  const b = Array.isArray(buys) ? buys : (buys?.bids || []);
+  const s = Array.isArray(sells) ? sells : (sells?.asks || []);
+  orderBookCache.bids = b;
+  orderBookCache.asks = s;
+
+  // Рендерим стакан
+  _renderOrderBookOriginal(buys, sells);
+
+  // Обновляем данные для depth chart
+
+  depthState.lastBids = b.map(l => ({ price: Number(l.price), size: Number(l.size) })).filter(l => l.size > 0);
+  depthState.lastAsks = s.map(l => ({ price: Number(l.price), size: Number(l.size) })).filter(l => l.size > 0);
+
+  if (depthState.view === 'depth') {
+    if (depthState.animFrame) cancelAnimationFrame(depthState.animFrame);
+    depthState.animFrame = requestAnimationFrame(renderDepthChart);
+  }
+}
+    
+// Инициализация
+initDepthTabs();
+    scheduleCompactLayoutSync();
+
+    // ======================== VAULT SYSTEM ========================
+    let vaultSelectedLock = 'locked';
+
+
+
+    async function loadVaultInfo() {
+      try {
+        const res = await authFetch(API_BASE + "/api/vault/info");
+        const data = await res.json();
+        if (data.ok) {
+          $('poolBalance').textContent = data.pool.totalBalance.toFixed(2) + ' VP';
+          $('pool24hPnL').textContent = (data.pool.pnl24h >= 0 ? '+' : '') + data.pool.pnl24h.toFixed(2) + ' VP';
+          $('pool24hPnL').className = `vault-stat-value ${data.pool.pnl24h >= 0 ? 'positive' : ''}`;
+          $('poolProviders').textContent = data.pool.providerCount;
+          if ($('poolLockedApy'))   $('poolLockedApy').textContent   = '—';
+          if ($('poolUnlockedApy')) $('poolUnlockedApy').textContent = '—';
+          const totalPnl = data.userSummary.totalPnl || 0;
+          $('userTotalEarned').textContent = (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(4) + ' VP';
+          $('poolLockedBal').textContent   = data.pool.totalLocked.toFixed(2);
+          $('poolUnlockedBal').textContent = data.pool.totalUnlocked.toFixed(2);
+          $('poolCumPnL').textContent      = data.pool.cumulativePnl.toFixed(2);
+          $('vaultDepositMaxLabel').textContent = 'Max: ' + (profile ? profile.balance.toFixed(2) : '0');
+          // Share price display
+          if ($('poolSharePrice') && data.pool.sharePrice != null) {
+            $('poolSharePrice').textContent = data.pool.sharePrice.toFixed(6);
+          }
+          renderVaultDeposits(data.userDeposits);
+        }
+      } catch(e) {
+        console.error("Error loading vault info:", e);
+      }
+    }
+
+    function renderVaultDeposits(deposits) {
+      const list = $('vaultDepositsList');
+      if (!deposits || deposits.length === 0) {
+        list.innerHTML = '<div class="vault-empty"><div class="vault-empty-icon">📭</div><div class="vault-empty-text">No active deposits yet</div></div>';
+        return;
+      }
+      list.innerHTML = '';
+      deposits.forEach(dep => {
+        const div = document.createElement('div');
+        div.className = 'vault-deposit-item';
+        const lockText = dep.lock_type === 'locked' ? `🔒 Locked${dep.daysLocked > 0 ? ` (${dep.daysLocked}d left)` : ' (unlocked)'}` : '🔓 Unlocked';
+        const canWithdraw = dep.canWithdraw;
+        const pnlColor = dep.pnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+        const pnlSign  = dep.pnl >= 0 ? '+' : '';
+        const currentValue = typeof dep.currentValue === 'number' ? dep.currentValue : Number(dep.currentValue || 0);
+        div.innerHTML = `
+          <div class="vault-dep-header">
+            <div style="font-weight: 700;">${(Number(dep.amount)).toFixed(2)} VP</div>
+            <div class="vault-dep-type${dep.lock_type === 'unlocked' ? ' unlocked' : ''}">LP Share</div>
+          </div>
+          <div class="vault-dep-stats">
+            <div class="vault-dep-stat">
+              <span class="vault-dep-stat-label">Share in Pool</span>
+              <span class="vault-dep-stat-value">${dep.sharePercent.toFixed(4)}%</span>
+            </div>
+            <div class="vault-dep-stat">
+              <span class="vault-dep-stat-label">Current Value</span>
+              <span class="vault-dep-stat-value">${currentValue.toFixed(4)} VP</span>
+            </div>
+            <div class="vault-dep-stat" style="grid-column: span 2;">
+              <span class="vault-dep-stat-label">PnL</span>
+              <span class="vault-dep-stat-value" style="color:${pnlColor};">${pnlSign}${dep.pnl.toFixed(4)} VP</span>
+            </div>
+          </div>
+          <div class="vault-dep-lock-status${dep.lock_type === 'locked' && dep.daysLocked > 0 ? ' locked' : ''}">
+            ${lockText}
+          </div>
+          <button class="vault-dep-withdraw-btn${!canWithdraw ? ' disabled' : ''}" data-deposit-id="${dep.id}" ${!canWithdraw ? 'disabled' : ''}>
+            ${canWithdraw ? 'Withdraw' : 'Locked'}
+          </button>
+        `;
+        list.appendChild(div);
+        const withdrawBtn = div.querySelector('.vault-dep-withdraw-btn');
+        if (canWithdraw) {
+          withdrawBtn.addEventListener('click', () => withdrawVaultDeposit(dep.id));
+        }
+      });
+    }
+
+    async function depositToVault() {
+      const amount = Number($('vaultDepositAmount').value);
+      if (!amount || amount < 10) { showToast("Minimum deposit: 10 VP", "error"); return; }
+      if (profile && amount > profile.balance) { showToast("Insufficient balance", "error"); return; }
+      const btn = $('vaultDepositBtn');
+      btn.disabled = true;
+      btn.textContent = 'Processing...';
+      try {
+        const res = await authFetch(API_BASE + "/api/vault/deposit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ amount: amount, lockType: vaultSelectedLock })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          if (profile) profile.balance = data.newBalance;
+          updateBalanceUI();
+          $('vaultDepositAmount').value = '';
+          loadVaultInfo();
+          showToast(`Deposited ${amount} VP to ${vaultSelectedLock === 'locked' ? 'locked' : 'unlocked'} pool`, "success");
+          if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+        } else {
+          showToast(data.error || "Deposit failed", "error");
+        }
+      } catch(e) {
+        showToast("Network error", "error");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Deposit to Pool';
+      }
+    }
+
+    async function withdrawVaultDeposit(depositId) {
+      if (!confirm("Withdraw from pool?")) return;
+      try {
+        const res = await authFetch(API_BASE + "/api/vault/withdraw", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ depositId: depositId })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          if (profile) profile.balance = data.newBalance;
+          updateBalanceUI();
+          loadVaultInfo();
+          const totalReturn = data.withdrawn + data.earned;
+          showToast(`Withdrew ${totalReturn.toFixed(4)} VP (earned: +${data.earned.toFixed(4)} VP)`, "success");
+          if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+        } else if (data.error === 'LOCKED') {
+          showToast(`Locked for ${data.daysRemaining} more days`, "error");
+        } else {
+          showToast(data.error || "Withdrawal failed", "error");
+        }
+      } catch(e) {
+        showToast("Network error", "error");
+      }
+    }
+
+    function openVaultModal() {
+      $('vaultModalOverlay').classList.add('active');
+      document.body.style.overflow = 'hidden';
+      $('vaultDepositMaxLabel').textContent = 'Max: ' + profile.balance.toFixed(2);
+      loadVaultInfo();
+      if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+    }
+
+    function closeVaultModal() {
+      $('vaultModalOverlay').classList.remove('active');
+      document.body.style.overflow = '';
+    }
+
+    $('btnVault').addEventListener('click', openVaultModal);
+    $('vaultModalClose').addEventListener('click', closeVaultModal);
+    $('vaultModalOverlay').addEventListener('click', (e) => {
+      if (e.target === $('vaultModalOverlay')) closeVaultModal();
+    });
+
+    document.querySelectorAll('.vault-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.vault-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.vault-tab-content').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        const tabName = tab.dataset.tab;
+        document.getElementById('tab' + tabName.charAt(0).toUpperCase() + tabName.slice(1)).classList.add('active');
+        vaultCurrentTab = tabName;
+      });
+    });
+
+    document.querySelectorAll('.vault-lock-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.vault-lock-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        vaultSelectedLock = btn.dataset.lock;
+      });
+    });
+
+    $('vaultDepositMaxLabel').addEventListener('click', () => {
+      if (profile) $('vaultDepositAmount').value = Math.floor(profile.balance);
+    });
+
+    $('vaultDepositBtn').addEventListener('click', depositToVault);
+
+})();
+</script>
+
+<!-- VAULT MODAL -->
+<div class="vault-modal-overlay" id="vaultModalOverlay">
+  <div class="vault-modal" id="vaultModal">
+    <div class="vault-modal-header">
+      <div class="vault-modal-title">💰 Liquidity Pool</div>
+      <button class="vault-modal-close" id="vaultModalClose">×</button>
+    </div>
+    <div class="vault-modal-content">
+      <div class="vault-tabs">
+        <button class="vault-tab active" data-tab="overview">Overview</button>
+        <button class="vault-tab" data-tab="deposit">Deposit</button>
+        <button class="vault-tab" data-tab="deposits">My Deposits</button>
+      </div>
+
+      <!-- TAB 1: OVERVIEW -->
+      <div class="vault-tab-content active" id="tabOverview">
+        <div class="vault-pool-stats" id="vaultPoolStats">
+          <div class="vault-stat-card">
+            <span class="vault-stat-label">Pool Balance</span>
+            <span class="vault-stat-value" id="poolBalance">0.00 VP</span>
+          </div>
+          <div class="vault-stat-card">
+            <span class="vault-stat-label">24h PnL</span>
+            <span class="vault-stat-value positive" id="pool24hPnL">+0.00 VP</span>
+          </div>
+          <div class="vault-stat-card">
+            <span class="vault-stat-label">Providers</span>
+            <span class="vault-stat-value" id="poolProviders">0</span>
+          </div>
+          <div class="vault-stat-card">
+            <span class="vault-stat-label">Share Price</span>
+            <span class="vault-stat-value" id="poolSharePrice">1.000000</span>
+          </div>
+          <div class="vault-stat-card">
+            <span class="vault-stat-label">Your Total PnL</span>
+            <span class="vault-stat-value positive" id="userTotalEarned">+0.0000 VP</span>
+          </div>
+        </div>
+
+        <div class="vault-info-box">
+          <strong>📊 Pool Stats:</strong><br>
+          Locked Balance: <span id="poolLockedBal">0.00</span> VP<br>
+          Unlocked Balance: <span id="poolUnlockedBal">0.00</span> VP<br>
+          Cumulative PnL: <span id="poolCumPnL">0.00</span> VP
+        </div>
+      </div>
+
+      <!-- TAB 2: DEPOSIT -->
+      <div class="vault-tab-content" id="tabDeposit">
+        <div class="vault-input-group">
+          <label class="vault-input-label">
+            <span>Amount (VP)</span>
+            <span id="vaultDepositMaxLabel" style="color: var(--accent-green); cursor: pointer;">Max: 0</span>
+          </label>
+          <input type="number" id="vaultDepositAmount" class="vault-input" placeholder="Min: 10 VP" step="1" min="10">
+        </div>
+
+        <div class="vault-input-group">
+          <label class="vault-input-label">Lock Type</label>
+          <div class="vault-lock-options">
+            <button class="vault-lock-btn active" data-lock="locked">
+              🔒 Locked (30d)<br>
+              <span style="font-size: 11px; opacity: 0.8;">Higher LP share</span>
+            </button>
+            <button class="vault-lock-btn" data-lock="unlocked">
+              🔓 Unlocked<br>
+              <span style="font-size: 11px; opacity: 0.8;">Flexible LP share</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="vault-info-box">
+          💡 <strong>Locked deposits</strong> earn a larger LP share and cannot be withdrawn for 30 days.<br>
+          <strong>Unlocked deposits</strong> can be withdrawn immediately. Both earn proportional pool PnL.
+        </div>
+
+        <button class="vault-submit-btn" id="vaultDepositBtn">Deposit to Pool</button>
+      </div>
+
+      <!-- TAB 3: MY DEPOSITS -->
+      <div class="vault-tab-content" id="tabDeposits">
+        <div id="vaultDepositsList" class="vault-deposits-list">
+          <div class="vault-empty">
+            <div class="vault-empty-icon">📭</div>
+            <div class="vault-empty-text">No active deposits yet</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

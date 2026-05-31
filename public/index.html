@@ -1217,36 +1217,6 @@
 
     .profile-container { flex: 1; display: flex; flex-direction: column; padding: 16px; overflow-y: auto; gap: 20px; background: var(--bg); }
     .pro-header, .asset-card, .analysis-block, .rewards-banner, .hist-header-row { flex-shrink: 0; }
-
-    /* Profile Navigation Menu */
-    .profile-menu { display: flex; flex-direction: column; gap: 2px; }
-    .profile-menu-item {
-      display: flex; align-items: center; justify-content: space-between;
-      background: var(--panel); border: 1px solid var(--border);
-      border-radius: 8px; padding: 14px 16px; cursor: pointer;
-      transition: background 0.15s, border-color 0.15s;
-    }
-    .profile-menu-item:active { background: var(--panel-hover); transform: scale(0.99); }
-    .pmi-left { display: flex; align-items: center; gap: 14px; }
-    .pmi-icon {
-      width: 40px; height: 40px; border-radius: 10px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 20px; flex-shrink: 0;
-    }
-    .pmi-icon-earn      { background: rgba(14,203,129,0.12); }
-    .pmi-icon-stats     { background: rgba(24,144,255,0.12); }
-    .pmi-icon-history   { background: rgba(168,85,247,0.12); }
-    .pmi-icon-referrals { background: rgba(240,185,11,0.12); }
-    .pmi-icon-rewards   { background: rgba(246,70,93,0.12); }
-    .pmi-info { display: flex; flex-direction: column; gap: 2px; }
-    .pmi-title { font-size: 14px; font-weight: 600; color: var(--white); }
-    .pmi-desc  { font-size: 11px; color: var(--muted); }
-    .pmi-arrow { font-size: 22px; color: var(--muted); font-weight: 300; line-height: 1; }
-
-    /* Sub-view header */
-    .subview-header { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; flex-shrink: 0; }
-    .subview-back { font-size: 28px; color: var(--white); cursor: pointer; line-height: 1; padding: 4px 8px 4px 0; font-weight: 300; }
-    .subview-title { font-size: 17px; font-weight: 700; color: var(--white); }
     .pro-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
     .pro-user { display: flex; align-items: center; gap: 12px; }
     .pro-avatar { width: 44px; height: 44px; border-radius: 50%; background: #333; overflow: hidden; border: 2px solid var(--panel); }
@@ -2514,7 +2484,6 @@
     </main>
   </div>
 
-  <!-- Profile Main View -->
   <div id="view-profile" class="view-section hidden">
     <div class="profile-container">
       <div class="pro-header">
@@ -2540,68 +2509,12 @@
           <button class="pro-btn">Withdraw</button>
         </div>
       </div>
-      <!-- Profile Navigation Menu -->
-      <div class="profile-menu">
-        <div class="profile-menu-item" id="btnMenuEarn">
-          <div class="pmi-left">
-            <div class="pmi-icon pmi-icon-earn">&#x1F4B9;</div>
-            <div class="pmi-info">
-              <div class="pmi-title">Earn</div>
-              <div class="pmi-desc">Liquidity Pool &amp; passive income</div>
-            </div>
-          </div>
-          <div class="pmi-arrow">&#x203A;</div>
+      <div class="vault-banner" id="btnVault">
+        <div class="vault-banner-content">
+          <h3>Liquidity Pool</h3>
+          <p>Earn passive income from trading activity</p>
         </div>
-        <div class="profile-menu-item" id="btnMenuStats">
-          <div class="pmi-left">
-            <div class="pmi-icon pmi-icon-stats">&#x1F4CA;</div>
-            <div class="pmi-info">
-              <div class="pmi-title">Statistics</div>
-              <div class="pmi-desc">Win rate, PnL &amp; performance</div>
-            </div>
-          </div>
-          <div class="pmi-arrow">&#x203A;</div>
-        </div>
-        <div class="profile-menu-item" id="btnMenuHistory">
-          <div class="pmi-left">
-            <div class="pmi-icon pmi-icon-history">&#x1F4CB;</div>
-            <div class="pmi-info">
-              <div class="pmi-title">Trade History</div>
-              <div class="pmi-desc">All your past trades</div>
-            </div>
-          </div>
-          <div class="pmi-arrow">&#x203A;</div>
-        </div>
-        <div class="profile-menu-item" id="btnMenuReferrals">
-          <div class="pmi-left">
-            <div class="pmi-icon pmi-icon-referrals">&#x1F465;</div>
-            <div class="pmi-info">
-              <div class="pmi-title">Referrals</div>
-              <div class="pmi-desc">Invite friends &amp; earn rewards</div>
-            </div>
-          </div>
-          <div class="pmi-arrow">&#x203A;</div>
-        </div>
-        <div class="profile-menu-item" id="btnMenuRewards">
-          <div class="pmi-left">
-            <div class="pmi-icon pmi-icon-rewards">&#x1F381;</div>
-            <div class="pmi-info">
-              <div class="pmi-title">Rewards</div>
-              <div class="pmi-desc">Tasks, achievements &amp; bonuses</div>
-            </div>
-          </div>
-          <div class="pmi-arrow">&#x203A;</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Profile Sub-View: Statistics -->
-  <div id="view-profile-stats" class="view-section hidden">
-    <div class="profile-container">
-      <div class="subview-header">
-        <div class="subview-back" id="btnBackFromStats">&#x2039;</div>
-        <div class="subview-title">Statistics</div>
+        <div class="vault-banner-icon">💰</div>
       </div>
       <div class="analysis-block">
         <div class="an-card">
@@ -2616,42 +2529,29 @@
           <div class="an-content-center">
             <div style="font-size:20px; font-weight:700; font-family:'Roboto Mono';" id="statPnL">0.00</div>
           </div>
-          <div style="font-size:10px; color:var(--muted); width:100%; text-align:center;">Tap for details &#x2192;</div>
+          <div style="font-size:10px; color:var(--muted); width:100%; text-align:center;">Tap for details →</div>
         </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Profile Sub-View: Trade History -->
-  <div id="view-profile-history" class="view-section hidden">
-    <div class="profile-container">
-      <div class="subview-header">
-        <div class="subview-back" id="btnBackFromHistory">&#x2039;</div>
-        <div class="subview-title">Trade History</div>
-      </div>
-      <div class="hist-header-row" style="margin-bottom:0;">
-        <div class="hist-filters" style="margin-left:auto;">
-          <div class="h-filter active" data-filter="all">All</div>
-          <div class="h-filter" data-filter="day">24h</div>
-          <div class="h-filter" data-filter="week">7d</div>
-        </div>
-      </div>
-      <div class="history-list" id="historyList"><div style="text-align:center; color:var(--muted); padding:20px; font-size:13px;">No trading history</div></div>
-    </div>
-  </div>
-
-  <!-- Profile Sub-View: Referrals -->
-  <div id="view-profile-referrals" class="view-section hidden">
-    <div class="profile-container">
-      <div class="subview-header">
-        <div class="subview-back" id="btnBackFromReferrals">&#x2039;</div>
-        <div class="subview-title">Referrals</div>
       </div>
       <div class="ref-card" id="refCard">
         <div class="ref-top"><div class="ref-title">Referrals</div><div class="ref-badge" id="refCountBadge">Invited: 0</div></div>
         <div class="ref-row"><input class="ref-input" id="refLinkInput" readonly value="Loading..."><button class="ref-btn primary" id="btnCopyRefLink">Copy</button></div>
         <div class="ref-help" id="refHelpText">Share the link with friends. When they open the bot using your link, they will be automatically assigned as your referral.</div>
         <div class="ref-list" id="refList"><div class="ref-status" id="refStatus">Loading referrals...</div></div>
+      </div>
+      <div class="rewards-banner" id="btnGoRewards">
+        <div class="rb-content"><h3>Rewards Center</h3><p>Complete tasks to unlock features</p></div>
+        <div class="rb-icon"><img src="https://i.postimg.cc/pdkwtBbQ/gift-thunder.png" style="width: 40px; height: auto;"></div>
+      </div>
+      <div>
+        <div class="hist-header-row">
+          <div class="hist-title">History</div>
+          <div class="hist-filters">
+            <div class="h-filter active" data-filter="all">All</div>
+            <div class="h-filter" data-filter="day">24h</div>
+            <div class="h-filter" data-filter="week">7d</div>
+          </div>
+        </div>
+        <div class="history-list" id="historyList"><div style="text-align:center; color:var(--muted); padding:20px; font-size:13px;">No trading history</div></div>
       </div>
     </div>
   </div>
@@ -4515,36 +4415,16 @@
       const target = $(viewId); target.classList.remove('hidden'); target.classList.add('active');
       if (viewId === 'view-profile') { if(tg) tg.BackButton.show(); }
       else if (viewId === 'view-trade') { if(tg) tg.BackButton.hide(); }
-      else if (viewId === 'view-rewards') { loadAdStats(); if(tg) tg.BackButton.show(); }
-      else if (viewId === 'view-profile-stats') { if(tg) tg.BackButton.show(); }
-      else if (viewId === 'view-profile-history') { renderHistoryList(); if(tg) tg.BackButton.show(); }
-      else if (viewId === 'view-profile-referrals') { renderReferrals(); if(tg) tg.BackButton.show(); }
+      else if (viewId === 'view-rewards') { loadAdStats(); }
     }
 
     $('btnProfile').onclick = () => { renderProfile(); showView('view-profile'); };
     $('btnCloseProfile').onclick = () => showView('view-trade');
+    $('btnGoRewards').onclick = () => showView('view-rewards');
     $('btnBackFromRewards').onclick = () => showView('view-profile');
     $('btnWatchAd').onclick = () => showRewardedAd();
-    // Profile menu navigation
-    $('btnMenuEarn').onclick = () => openVaultModal();
-    $('btnMenuStats').onclick = () => showView('view-profile-stats');
-    $('btnMenuHistory').onclick = () => showView('view-profile-history');
-    $('btnMenuReferrals').onclick = () => showView('view-profile-referrals');
-    $('btnMenuRewards').onclick = () => showView('view-rewards');
-    // Sub-view back buttons
-    $('btnBackFromStats').onclick = () => showView('view-profile');
-    $('btnBackFromHistory').onclick = () => showView('view-profile');
-    $('btnBackFromReferrals').onclick = () => showView('view-profile');
 
-    if(tg) { tg.BackButton.onClick(() => {
-        const activeView = document.querySelector('.view-section.active');
-        const activeId = activeView ? activeView.id : '';
-        if (activeId === 'view-rewards') showView('view-profile');
-        else if (activeId === 'view-profile-stats') showView('view-profile');
-        else if (activeId === 'view-profile-history') showView('view-profile');
-        else if (activeId === 'view-profile-referrals') showView('view-profile');
-        else if (activeId === 'view-profile') showView('view-trade');
-      }); }
+    if(tg) { tg.BackButton.onClick(() => { const vr = $('view-rewards'), vp = $('view-profile'); if(vr.classList.contains('active')) showView('view-profile'); else if(vp.classList.contains('active')) showView('view-trade'); }); }
 
     const btnEye = $('btnToggleBalance');
     if(btnEye) { btnEye.onclick = (e) => { e.stopPropagation(); isBalanceHidden = !isBalanceHidden; btnEye.src = isBalanceHidden ? ICON_EYE_CLOSED : ICON_EYE_OPEN; updateBalanceUI(); }; }

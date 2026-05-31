@@ -5897,8 +5897,7 @@
       const spreadPctText = (midPrice && spread >= 0) ? spreadPct.toFixed(3) + '%' : '—';
 
       html += `<div class="ob-spread-row">`
-        +     `<div class="ob-spread-price ${priceCl
-s}"><span>${lastPxText}</span><span class="ob-spread-arrow">${arrow}</span></div>`
+        +     `<div class="ob-spread-price ${priceCls}"><span>${lastPxText}</span><span class="ob-spread-arrow">${arrow}</span></div>`
         +     `<div class="ob-spread-mid">Mid<span class="ob-spread-mid-val">${midText}</span></div>`
         +     `<div class="ob-spread-pct" title="Spread">${spreadPctText}</div>`
         +   `</div>`;

@@ -5587,45 +5587,93 @@
 
         if (msg.type === "history") {
           if (msg.timeframe && Number(msg.timeframe) !== Number(currentTimeframe)) return;
-          const data = msg.data.map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume || 0 }));
-          localCandles = data;
-          localVolumes = buildVolumeData(data);
-          candleSeries.setData(data);
+
+          // Дедупликация и сортировка входящих свечей — защита от дублей с сервера
+          const rawData = msg.data.map(c => ({
+            time: c.time,
+            open: Number(c.open),
+            high: Number(c.high),
+            low: Number(c.low),
+            close: Number(c.close),
+            volume: Number(c.volume) || 0
+          }));
+
+          // Удаляем дубли по timestamp, оставляем последнее вхождение (более свежее)
+          const deduped = new Map();
+          for (const c of rawData) deduped.set(c.time, c);
+          const data = Array.from(deduped.values()).sort((a, b) => a.time - b.time);
+
+          if (data.length === 0) return;
+
+          const now = Math.floor(Date.now() / 1000);
+          const currentCandleTime = now - (now % currentTimeframe);
+
+          // Проверяем: сервер мог включить в историю незакрытую текущую свечу.
+          // Такая свеча имеет частичные данные (high/low ещё не финальные).
+          // Мы её берём как lastCandle, но ОБНОВЛЯЕМ её данные текущей ценой позднее.
+          // Если последняя свеча > currentCandleTime — это баг данных, обрезаем.
+          const filteredData = data.filter(c => c.time <= currentCandleTime);
+          if (filteredData.length === 0) return;
+
+          localCandles = filteredData;
+          localVolumes = buildVolumeData(filteredData);
+          candleSeries.setData(filteredData);
           if (indicatorState.volume && volumeHistogramSeries) volumeHistogramSeries.setData(localVolumes);
           chart.timeScale().fitContent();
           chart.priceScale('right').applyOptions({ autoScale: true });
           requestAnimationFrame(syncPriceScaleWidths);
-          if (data.length) {
-            const last = data[data.length - 1];
-            const now = Math.floor(Date.now() / 1000);
-            const currentCandleTime = now - (now % currentTimeframe);
-            if (last.time >= currentCandleTime) {
-              lastCandle = last;
-            } else {
-              // FIX: Last historical candle is older than current slot — there's a gap.
-              // Create a stub candle at the current slot using last.close, and also
-              // push a matching volume entry + update volume series so they stay in sync.
-              lastCandle = { time: currentCandleTime, open: last.close, high: last.close, low: last.close, close: last.close, volume: 0 };
-              localCandles.push(lastCandle);
-              safeUpdateCandle(lastCandle);
-              const stubVol = { time: currentCandleTime, value: 0, color: 'rgba(14, 203, 129, 0.5)' };
-              localVolumes.push(stubVol);
-              if (indicatorState.volume && volumeHistogramSeries) volumeHistogramSeries.update(stubVol);
-              // If the gap is more than 1 slot, re-subscribe so server re-sends fresh history to fill it.
-              const gapSlots = Math.round((currentCandleTime - last.time) / currentTimeframe);
-              if (gapSlots > 1) {
-                try {
-                  if (socket && socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({ type: "subscribe", pair: selectedPair, timeframe: currentTimeframe }));
-                  }
-                } catch(e) { console.warn('history gap re-subscribe failed', e); }
-              }
+
+          // ВАЖНО: lastCandle должен ссылаться на объект ВНУТРИ localCandles,
+          // а не на объект из data/rawData. Иначе после следующего setData
+          // lastCandle станет "зависшим" объектом вне массива, и candleSeries.update()
+          // будет обновлять призрачную свечу — что и вызывает "огромную последнюю свечу"
+          // при перезагрузке страницы.
+          const lastHistorical = localCandles[localCandles.length - 1];
+
+          if (lastHistorical.time === currentCandleTime) {
+            // Последняя свеча — текущий временной слот (сервер включил открытую свечу).
+            // Используем её напрямую. Цена придёт через 'price'-сообщение и обновит её.
+            lastCandle = lastHistorical;
+          } else {
+            // Последняя историческая свеча старше текущего слота — создаём stub для текущего слота.
+            // Stub открывается по close предыдущей свечи (gap = 0 или gap = 1 слот).
+            // При gap > 1 слота переподписываемся, чтобы получить свежую историю.
+            const gapSlots = Math.round((currentCandleTime - lastHistorical.time) / currentTimeframe);
+
+            lastCandle = {
+              time: currentCandleTime,
+              open: lastHistorical.close,
+              high: lastHistorical.close,
+              low: lastHistorical.close,
+              close: lastHistorical.close,
+              volume: 0
+            };
+
+            // Добавляем stub в localCandles ПЕРВЫМ — до setData/update —
+            // чтобы lastCandle ссылался на объект внутри массива.
+            localCandles.push(lastCandle);
+            const stubVol = { time: currentCandleTime, value: 0, color: 'rgba(14, 203, 129, 0.5)' };
+            localVolumes.push(stubVol);
+
+            // Обновляем серии новой свечой
+            safeUpdateCandle(lastCandle);
+            if (indicatorState.volume && volumeHistogramSeries) volumeHistogramSeries.update(stubVol);
+
+            if (gapSlots > 1) {
+              // Большой gap — переподписываемся за свежей историей
+              try {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                  socket.send(JSON.stringify({ type: "subscribe", pair: selectedPair, timeframe: currentTimeframe }));
+                }
+              } catch(e) { console.warn('history gap re-subscribe failed', e); }
             }
-            marketPrices[selPairNorm] = lastCandle.close;
-            $('priceDisplay').textContent = formatPrice(lastCandle.close);
-            const askDisplay = $('askPriceDisplay');
-            if (askDisplay) askDisplay.textContent = formatPrice(lastCandle.close);
           }
+
+          marketPrices[selPairNorm] = lastCandle.close;
+          $('priceDisplay').textContent = formatPrice(lastCandle.close);
+          const askDisplay = $('askPriceDisplay');
+          if (askDisplay) askDisplay.textContent = formatPrice(lastCandle.close);
+
           updateIndicators();
           if (historyResolve) { historyResolve(); historyResolve = null; }
           isLoadingHistory = false;

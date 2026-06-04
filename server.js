@@ -81,6 +81,7 @@ const MAX_TP_PER_POSITION = 3;
 const MAX_SL_PER_POSITION = 3;
 const MIN_PARTIAL_PERCENT = 10;
 const MAX_PARTIAL_PERCENT = 100;
+const SUPPORTED_MARKET_PAIRS = ["BTC-USDT", "ETH-USDT", "SOL-USDT", "BNB-USDT", "XRP-USDT", "DOGE-USDT", "ADA-USDT", "LINK-USDT", "SUI-USDT", "XAUT-USDT"];
 
 // ======================== VAULT CONSTANTS ========================
 const VAULT_FRACTION = 0.5;              // 50% P&L трейдера идёт из/в пул
@@ -125,6 +126,20 @@ function buildReferralLink(code) {
 function getTodayDateUTC() {
     const now = new Date();
     return now.toISOString().split('T')[0];
+}
+
+function normalizePair(p) {
+    return String(p || "").trim().replace("/", "-").toUpperCase();
+}
+
+function normalizeSupportedMarketPairs(pairs) {
+    const allowed = new Set(SUPPORTED_MARKET_PAIRS);
+    const out = [];
+    for (const pair of Array.isArray(pairs) ? pairs : []) {
+        const normalized = normalizePair(pair);
+        if (allowed.has(normalized) && !out.includes(normalized)) out.push(normalized);
+    }
+    return out;
 }
 
 function checkAndResetDailyAds(user) {
@@ -211,6 +226,14 @@ function verifySessionCookieValue(val) {
     return safeEqual(mac, expected) ? userId : false;
 }
 
+function getBearerSessionToken(req) {
+    const auth = req.headers.authorization || "";
+    const match = String(auth).match(/^Bearer\s+(.+)$/i);
+    if (match?.[1]) return match[1].trim();
+    const fallback = req.headers["x-session-token"];
+    return fallback ? String(fallback).trim() : "";
+}
+
 function makeWsAuthToken(userId) {
     const expiresAt = Date.now() + WS_TOKEN_TTL_MS;
     const payload = `${userId}:${expiresAt}`;
@@ -220,7 +243,7 @@ function makeWsAuthToken(userId) {
 
 async function getAuthenticatedUserId(req) {
     const cookies = parseCookies(req);
-    const userId = verifySessionCookieValue(cookies[COOKIE_NAME]);
+    const userId = verifySessionCookieValue(cookies[COOKIE_NAME]) || verifySessionCookieValue(getBearerSessionToken(req));
     return userId ? String(userId) : null;
 }
 
@@ -463,6 +486,17 @@ async function initDB() {
         await db.query(`CREATE INDEX IF NOT EXISTS price_alerts_pair_status_idx ON price_alerts(pair, status) WHERE status = 'ACTIVE';`);
         console.log("✅ Price Alerts table ready");
 
+        await db.query(`
+            CREATE TABLE IF NOT EXISTS user_market_favorites (
+                user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                pair TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, pair)
+            );
+        `);
+        await db.query(`CREATE INDEX IF NOT EXISTS user_market_favorites_user_idx ON user_market_favorites(user_id);`);
+        console.log("✅ Market favorites table ready");
+
         // ======================== VAULT / LIQUIDITY POOL TABLES ========================
 
         await db.query(`
@@ -669,9 +703,7 @@ app.post("/api/init", async (req, res) => {
 
             userRow = await upsertUserFromObj(userObj, ip, startParam);
         } else {
-            const cookies = parseCookies(req);
-            const sessionVal = cookies[COOKIE_NAME];
-            const userId = verifySessionCookieValue(sessionVal);
+            const userId = await getAuthenticatedUserId(req);
 
             if (!userId) return res.status(401).json({ ok: false, error: "NO_SESSION" });
 
@@ -708,6 +740,11 @@ app.post("/api/init", async (req, res) => {
             [userRow.user_id]
         );
 
+        const marketFavoritesRes = await db.query(
+            "SELECT pair FROM user_market_favorites WHERE user_id = $1 ORDER BY created_at ASC",
+            [userRow.user_id]
+        );
+
         const cookieVal = makeSessionCookieValue(userRow.user_id);
         const isSecure = req.headers["x-forwarded-proto"] === "https" || req.protocol === "https";
 
@@ -730,7 +767,9 @@ app.post("/api/init", async (req, res) => {
             positions: positionsRes.rows,
             tpSlOrders: tpSlRes.rows,
             limitOrders: limitOrdersRes.rows,
+            marketFavorites: marketFavoritesRes.rows.map(row => row.pair),
             account,
+            sessionToken: cookieVal,
             wsAuthToken: makeWsAuthToken(userRow.user_id)
         });
 
@@ -811,6 +850,56 @@ app.get("/api/user/history", async (req, res) => {
     } catch (err) {
         console.error("Error fetching history:", err);
         res.status(500).json({ ok: false, error: "SERVER_ERROR" });
+    }
+});
+
+app.get("/api/user/market-favorites", async (req, res) => {
+    try {
+        const userId = await getAuthenticatedUserId(req);
+        if (!userId) return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
+
+        const favRes = await db.query(
+            "SELECT pair FROM user_market_favorites WHERE user_id = $1 ORDER BY created_at ASC",
+            [userId]
+        );
+
+        res.json({ ok: true, favorites: favRes.rows.map(row => row.pair) });
+    } catch (err) {
+        console.error("Error fetching market favorites:", err);
+        res.status(500).json({ ok: false, error: "SERVER_ERROR" });
+    }
+});
+
+app.post("/api/user/market-favorites", async (req, res) => {
+    let client;
+    try {
+        const userId = await getAuthenticatedUserId(req);
+        if (!userId) {
+            return res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
+        }
+
+        const favorites = normalizeSupportedMarketPairs(req.body?.favorites);
+
+        client = await db.connect();
+        await client.query("BEGIN");
+        await client.query("DELETE FROM user_market_favorites WHERE user_id = $1", [userId]);
+        for (const pair of favorites) {
+            await client.query(
+                "INSERT INTO user_market_favorites (user_id, pair) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                [userId, pair]
+            );
+        }
+        await client.query("COMMIT");
+
+        res.json({ ok: true, favorites });
+    } catch (err) {
+        if (client) {
+            try { await client.query("ROLLBACK"); } catch (_) {}
+        }
+        console.error("Error saving market favorites:", err);
+        res.status(500).json({ ok: false, error: "SERVER_ERROR" });
+    } finally {
+        if (client) client.release();
     }
 });
 
@@ -1953,7 +2042,23 @@ app.post("/api/user/margin-mode", async (req, res) => {
     }
 });
 
-app.get("/api/health", (req, res) => res.json({ ok: true }));
+app.get("/api/health", (req, res) => res.json({
+    ok: true,
+    service: "api",
+    entrypoint: "server.js",
+    uptime: process.uptime()
+}));
+
+app.use("/api", (req, res) => {
+    res.status(404).json({
+        ok: false,
+        error: "API_ROUTE_NOT_FOUND",
+        method: req.method,
+        path: req.originalUrl,
+        service: "api",
+        entrypoint: "server.js"
+    });
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

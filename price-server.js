@@ -23,7 +23,7 @@ app.use(cors());
 app.use(express.json());
 
 app.get("/health", (req, res) => {
-    res.status(200).send("Im Alive");
+    res.status(200).json({ ok: true, service: "price", entrypoint: "price-server.js" });
 });
 
 app.post('/internal/price-alerts/refresh', async (req, res) => {
@@ -44,9 +44,14 @@ app.post('/internal/price-alerts/refresh', async (req, res) => {
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-const PRODUCTS = ["BTC-USDT", "ETH-USDT"];
+const PRODUCTS = ["BTC-USDT", "ETH-USDT", "SOL-USDT", "BNB-USDT", "XRP-USDT", "DOGE-USDT", "ADA-USDT", "LINK-USDT", "SUI-USDT", "XAUT-USDT"];
 const COINBASE_REST = "https://api.exchange.coinbase.com";
-const BINANCE_WS_BASE = "wss://stream.binance.com:9443/stream?streams=";
+// ВАЖНО: api.binance.com / stream.binance.com отдают HTTP 451 (restricted location)
+// с облачных IP (Render, GCP, AWS-US и т.д.). Публичные зеркала рыночных данных
+// *.binance.vision не имеют гео-ограничений и поддерживают klines/depth/ticker/trades.
+// Использовать только для ПУБЛИЧНЫХ данных — подписанные запросы они не обслуживают.
+const BINANCE_REST = "https://data-api.binance.vision";
+const BINANCE_WS_BASE = "wss://data-stream.binance.vision/stream?streams=";
 const DATABASE_URL = process.env.DATABASE_URL;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const AUTH_SECRET = process.env.COOKIE_SECRET || process.env.BOT_TOKEN || crypto.randomBytes(32).toString("hex");
@@ -54,10 +59,32 @@ const WS_AUTH_TOKEN_MAX_AGE_MS = 10 * 60 * 1000;
 const VAULT_FRACTION = 0.5;              // 50% P&L идёт из пула
 const MAX_VAULT_DRAIN_PER_TRADE = 0.1;   // Макс 10% пула за сделку
 const TIMEFRAMES = [60, 300, 900, 3600, 21600, 86400];
+const BINANCE_INTERVALS = {
+    60: "1m",
+    300: "5m",
+    900: "15m",
+    3600: "1h",
+    21600: "6h",
+    86400: "1d"
+};
+
+// OKX — резервный источник истории для пар, которых нет на Coinbase (напр. XAUT-USDT).
+// Binance REST (api.binance.com и зеркала *.vision) банит облачные IP (Render): сначала
+// HTTP 451, затем 418 "I'm a teapot". OKX отдаёт XAUT-USDT с облачных IP без гео-бана.
+const OKX_REST = "https://www.okx.com";
+const OKX_INTERVALS = {
+    60: "1m",
+    300: "5m",
+    900: "15m",
+    3600: "1H",
+    21600: "6H",
+    86400: "1D"
+};
 
 const COINBASE_MAX_CANDLES_PER_REQUEST = 300;
 const INITIAL_HISTORY_CANDLES = 100;
 const MAX_CACHED_CANDLES = 20000;
+const BINANCE_ONLY_HISTORY_PRODUCTS = new Set(["XAUT-USDT"]);
 
 const MIN_PARTIAL_PERCENT = 10;
 const MAX_TP_PER_POSITION = 3;
@@ -545,7 +572,8 @@ function withHistoryLock(product, granularity, fn) {
 
 function getCoinbaseSymbol(binanceStreamName) {
     const symbol = binanceStreamName.split("@")[0];
-    return symbol.toUpperCase().replace("USDT", "-USDT");
+    const upper = symbol.toUpperCase();
+    return upper.endsWith("USDT") ? `${upper.slice(0, -4)}-USDT` : upper;
 }
 
 function formatBinanceOrderBook(bids, asks) {
@@ -1245,10 +1273,91 @@ async function fetchCoinbaseCandlesPage(product, granularity, endSec) {
     }
 }
 
+async function fetchBinanceCandlesPage(product, granularity, endSec) {
+    try {
+        const symbol = getBinanceSymbol(product).toUpperCase();
+        const interval = BINANCE_INTERVALS[normalizeGranularity(granularity)] || "1m";
+        const endTime = Math.floor(endSec * 1000);
+        const limit = Math.min(1000, Math.max(1, COINBASE_MAX_CANDLES_PER_REQUEST));
+        const url = `${BINANCE_REST}/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}&endTime=${endTime}`;
+        const r = await fetch(url, { headers: { "User-Agent": "TradeSimBot/1.0" } });
+        if (!r.ok) {
+            console.error(`Binance klines ${symbol} (${interval}) HTTP ${r.status} ${r.statusText}`);
+            return;
+        }
+        const chunk = await r.json();
+        if (!Array.isArray(chunk)) return;
+        return chunk
+            .map(c => ({
+                time: Math.floor(Number(c[0]) / 1000),
+                open: Number(c[1]),
+                high: Number(c[2]),
+                low: Number(c[3]),
+                close: Number(c[4]),
+                volume: Number(c[5]) || 0,
+            }))
+            .filter(c => Number.isFinite(c.time) && Number.isFinite(c.open) && Number.isFinite(c.close))
+            .sort((a, b) => a.time - b.time);
+    } catch (e) {
+        console.error(`Binance history error ${product} (${granularity}s):`, e.message);
+        return;
+    }
+}
+
+async function fetchOkxCandlesPage(product, granularity, endSec) {
+    try {
+        const instId = product; // OKX использует тот же формат "XAUT-USDT"
+        const bar = OKX_INTERVALS[normalizeGranularity(granularity)] || "1m";
+        const limit = Math.min(300, Math.max(1, COINBASE_MAX_CANDLES_PER_REQUEST));
+        // OKX `after` возвращает свечи СТАРШЕ указанного ts (в мс) — то, что нужно
+        // и для последней страницы (endSec = now), и для подгрузки истории назад.
+        const after = Math.floor(endSec * 1000);
+        const url = `${OKX_REST}/api/v5/market/candles?instId=${encodeURIComponent(instId)}&bar=${bar}&limit=${limit}&after=${after}`;
+        const r = await fetch(url, { headers: { "User-Agent": "TradeSimBot/1.0" } });
+        if (!r.ok) {
+            console.error(`OKX candles ${instId} (${bar}) HTTP ${r.status} ${r.statusText}`);
+            return;
+        }
+        const body = await r.json();
+        if (!body || body.code !== "0" || !Array.isArray(body.data)) {
+            console.error(`OKX candles ${instId} (${bar}) bad payload: ${body && body.msg}`);
+            return;
+        }
+        // Формат строки OKX: [ts(ms), open, high, low, close, vol, volCcy, volCcyQuote, confirm]
+        return body.data
+            .map(c => ({
+                time: Math.floor(Number(c[0]) / 1000),
+                open: Number(c[1]),
+                high: Number(c[2]),
+                low: Number(c[3]),
+                close: Number(c[4]),
+                volume: Number(c[5]) || 0,
+            }))
+            .filter(c => Number.isFinite(c.time) && Number.isFinite(c.open) && Number.isFinite(c.close))
+            .sort((a, b) => a.time - b.time);
+    } catch (e) {
+        console.error(`OKX history error ${product} (${granularity}s):`, e.message);
+        return;
+    }
+}
+
+async function fetchCandlesPage(product, granularity, endSec) {
+    if (BINANCE_ONLY_HISTORY_PRODUCTS.has(product)) {
+        // OKX первичный (не банит облачные IP), Binance — запасной
+        const okxPage = await fetchOkxCandlesPage(product, granularity, endSec);
+        if (okxPage && okxPage.length) return okxPage;
+        return fetchBinanceCandlesPage(product, granularity, endSec);
+    }
+
+    const coinbasePage = await fetchCoinbaseCandlesPage(product, granularity, endSec);
+    if (coinbasePage && coinbasePage.length) return coinbasePage;
+    return fetchBinanceCandlesPage(product, granularity, endSec);
+}
+
 async function refreshLatestHistory(product, granularity = 60) {
     const g = normalizeGranularity(granularity);
     const nowSec = Math.floor(Date.now() / 1000);
-    const page = await fetchCoinbaseCandlesPage(product, g, nowSec);
+    const page = await fetchCandlesPage(product, g, nowSec);
     if (!page || page.length === 0) return;
 
     const existing = ensureHistoryBucket(product, g);
@@ -1267,7 +1376,7 @@ async function ensureHistoryLength(product, granularity = 60, minCandles = INITI
         safetyPages++;
         const oldest = arr[0].time;
         const endSec = oldest - 1;
-        const page = await fetchCoinbaseCandlesPage(product, g, endSec);
+        const page = await fetchCandlesPage(product, g, endSec);
         if (!page || page.length === 0) break;
         arr = mergeCandles(arr, page);
         historyStore[product][g] = arr;
@@ -1292,7 +1401,7 @@ async function ensureHistoryBefore(product, granularity, untilSec) {
         safetyPages++;
         const oldest = arr[0].time;
         const endSec = oldest - 1;
-        const page = await fetchCoinbaseCandlesPage(product, g, endSec);
+        const page = await fetchCandlesPage(product, g, endSec);
         if (!page || page.length === 0) break;
         arr = mergeCandles(arr, page);
         historyStore[product][g] = arr;
@@ -1336,6 +1445,7 @@ function connectBinanceWS() {
                     high24h: Number(msg.data.h),   // Максимум за 24ч
                     low24h: Number(msg.data.l),    // Минимум за 24ч
                     volume24h: Number(msg.data.v), // Объем торгов за 24ч (Base asset)
+                    quoteVolume24h: Number(msg.data.q), // Объем торгов за 24ч в quote asset (USDT)
                     ts: Date.now() 
                 });
                 processPriceAlertsForPair(pair, latestPrice[pair]).catch(e => console.error('❌ Alert processing error:', e.message));

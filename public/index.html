@@ -44,10 +44,14 @@
     ::-webkit-scrollbar-thumb { background: transparent; }
     * { scrollbar-width: none; -ms-overflow-style: none; }
 
-    .app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; position: relative; }
+    .app {
+      --bottom-nav-height: 58px;
+      --bottom-nav-safe: env(safe-area-inset-bottom, 0px);
+      display: flex; flex-direction: column; height: 100vh; height: 100dvh; position: relative;
+    }
 
     .view-section {
-      flex: 1; display: flex; flex-direction: column; height: 100%; overflow: hidden;
+      flex: 1; display: flex; flex-direction: column; height: calc(100% - var(--bottom-nav-height) - var(--bottom-nav-safe)); overflow: hidden;
       transition: opacity 0.3s ease, transform 0.3s ease;
       position: absolute; width: 100%; top: 0; left: 0; background: var(--bg);
     }
@@ -234,9 +238,10 @@
     .container {
       flex: 1; display: flex; flex-direction: column;
       overflow-y: auto; overflow-x: hidden; padding: 8px; gap: 8px;
+      scroll-padding-bottom: 16px;
     }
     @media (min-width: 900px) {
-      .container { display: grid; grid-template-columns: 1fr 340px; height: calc(100vh - 48px); overflow: hidden; }
+      .container { display: grid; grid-template-columns: 1fr 340px; height: calc(100vh - 48px - var(--bottom-nav-height) - var(--bottom-nav-safe)); overflow: hidden; }
       .left-col { overflow-y: auto; padding-right: 4px; }
       .right-col { overflow: hidden; height: 100%; }
       .ob-container, .pos-list { max-height: 400px; overflow-y: auto; }
@@ -1215,7 +1220,7 @@
     @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(-20px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
     @keyframes toastOut { from { opacity: 1; transform: translateX(-50%) translateY(0); } to { opacity: 0; transform: translateX(-50%) translateY(-20px); } }
 
-    .profile-container { flex: 1; display: flex; flex-direction: column; padding: 16px; overflow-y: auto; gap: 20px; background: var(--bg); }
+    .profile-container { flex: 1; display: flex; flex-direction: column; padding: 16px 16px 20px; overflow-y: auto; gap: 20px; background: var(--bg); scroll-padding-bottom: 20px; }
     .pro-header, .asset-card, .analysis-block, .rewards-banner, .hist-header-row { flex-shrink: 0; }
     .pro-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
     .pro-user { display: flex; align-items: center; gap: 12px; }
@@ -1387,7 +1392,253 @@
     .hc-val { color: var(--white); font-family: 'Roboto Mono'; }
     .hc-pnl { font-weight: 700; font-family: 'Roboto Mono'; font-size: 14px; }
 
-    .rewards-container { padding: 20px; display: flex; flex-direction: column; gap: 24px; overflow-y: auto; padding-bottom: 100px; }
+    .markets-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 12px 12px 20px;
+      overflow-y: auto;
+      background: var(--bg);
+      scroll-padding-bottom: 20px;
+    }
+    .markets-topbar {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 4px 2px 2px;
+    }
+    .markets-title { font-size: 18px; font-weight: 800; color: var(--white); }
+    .markets-subtitle { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .markets-count {
+      font-family: 'Roboto Mono', monospace;
+      font-size: 11px;
+      color: var(--muted-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 5px 8px;
+      background: rgba(255,255,255,0.03);
+      white-space: nowrap;
+    }
+    .markets-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .markets-tab {
+      flex: 1;
+      height: 36px;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      border-bottom: 2px solid transparent;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .markets-tab.active {
+      color: var(--white);
+      border-bottom-color: var(--accent-green);
+    }
+    .markets-controls {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .markets-sort-dropdown {
+      position: relative;
+      width: 100%;
+      font-family: 'Inter', system-ui, sans-serif;
+      z-index: 30;
+    }
+    .markets-sort-trigger {
+      width: 100%;
+      min-height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--panel);
+      color: var(--white);
+      padding: 0 11px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    .markets-sort-trigger:hover,
+    .markets-sort-dropdown.open .markets-sort-trigger {
+      background: var(--panel-hover);
+      border-color: rgba(255,255,255,0.14);
+    }
+    .markets-sort-trigger .arrow {
+      color: var(--muted);
+      font-size: 10px;
+      transition: transform 0.2s;
+    }
+    .markets-sort-dropdown.open .markets-sort-trigger .arrow { transform: rotate(180deg); }
+    .markets-sort-menu {
+      position: absolute;
+      top: calc(100% + 5px);
+      left: 0;
+      right: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 5px;
+      background: #1A1F27;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 12px 28px rgba(0,0,0,0.5);
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-6px);
+      transition: opacity 0.2s ease, transform 0.2s ease;
+      z-index: 60;
+    }
+    .markets-sort-dropdown.open .markets-sort-menu {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+    .markets-sort-item {
+      width: 100%;
+      min-height: 34px;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      padding: 0 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      text-align: left;
+    }
+    .markets-sort-item:hover { background: var(--panel-hover); color: var(--white); }
+    .markets-sort-item.active {
+      background: rgba(255,255,255,0.08);
+      color: var(--white);
+    }
+    .markets-sort-item.active::after {
+      content: '✓';
+      color: var(--accent-green);
+      font-size: 12px;
+    }
+    .markets-list { display: flex; flex-direction: column; gap: 8px; }
+    .market-row {
+      width: 100%;
+      min-height: 58px;
+      display: grid;
+      grid-template-columns: 38px 1fr auto;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--white);
+      text-align: left;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    .market-row:hover { background: var(--panel-hover); border-color: rgba(255,255,255,0.12); }
+    .market-row.active { border-color: rgba(240,185,11,0.42); background: rgba(240,185,11,0.05); }
+    .market-favorite {
+      width: 30px;
+      height: 30px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: rgba(255,255,255,0.03);
+      color: var(--muted);
+      font-size: 18px;
+      cursor: pointer;
+      transition: color 0.2s, background 0.2s, border-color 0.2s;
+    }
+    .market-favorite.active {
+      color: var(--gold);
+      background: rgba(240,185,11,0.12);
+      border-color: rgba(240,185,11,0.32);
+    }
+    .market-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .market-symbol { font-size: 14px; font-weight: 800; font-family: 'Roboto Mono', monospace; color: var(--white); }
+    .market-price { font-size: 12px; color: var(--muted-2); font-family: 'Roboto Mono', monospace; }
+    .market-meta { font-size: 10px; color: var(--muted); font-family: 'Roboto Mono', monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .market-change {
+      min-width: 78px;
+      height: 32px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 800;
+      font-family: 'Roboto Mono', monospace;
+      border: 1px solid transparent;
+    }
+    .market-change.positive { color: var(--accent-green); background: var(--accent-green-transparent); border-color: rgba(14,203,129,0.2); }
+    .market-change.negative { color: var(--accent-red); background: var(--accent-red-transparent); border-color: rgba(246,70,93,0.2); }
+    .market-change.neutral { color: var(--muted-2); background: rgba(255,255,255,0.05); border-color: var(--border); }
+    .markets-empty {
+      padding: 28px 12px;
+      text-align: center;
+      color: var(--muted);
+      border: 1px dashed rgba(255,255,255,0.12);
+      border-radius: 8px;
+      background: rgba(255,255,255,0.02);
+    }
+
+    .bottom-nav {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: calc(var(--bottom-nav-height) + var(--bottom-nav-safe));
+      padding: 5px 8px calc(5px + var(--bottom-nav-safe));
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      background: rgba(21,26,30,0.96);
+      border-top: 1px solid var(--border);
+      box-shadow: 0 -10px 28px rgba(0,0,0,0.34);
+      backdrop-filter: blur(14px);
+      z-index: 950;
+    }
+    .bottom-nav-btn {
+      min-width: 0;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      font-size: 10px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s, border-color 0.2s;
+    }
+    .bottom-nav-btn img { width: 20px; height: 20px; flex-shrink: 0; object-fit: contain; opacity: 0.72; transition: opacity 0.2s; }
+    .bottom-nav-btn.active {
+      color: var(--white);
+      background: rgba(255,255,255,0.06);
+      border-color: rgba(255,255,255,0.08);
+    }
+    .bottom-nav-btn.active img { opacity: 1; }
+
+    .rewards-container { gap: 20px; }
     .rewards-header { text-align: center; padding: 20px 0; }
     .rh-title { font-size: 22px; font-weight: 700; color: var(--white); margin-bottom: 8px; }
     .rh-sub { font-size: 13px; color: var(--muted); }
@@ -1420,7 +1671,7 @@
     .btn-claim.loading { opacity: 0.7; pointer-events: none; }
 
     .btn-back-float {
-      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      position: fixed; bottom: calc(var(--bottom-nav-height) + var(--bottom-nav-safe) + 16px); left: 50%; transform: translateX(-50%);
       background: var(--panel-light); border: 1px solid var(--border); color: var(--white);
       padding: 12px 24px; border-radius: 4px; font-weight: 600; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
       z-index: 900; cursor: pointer;
@@ -1782,12 +2033,11 @@
 .pml-item:hover { border-color: rgba(14, 203, 129, 0.25); }
 .pml-item:active { transform: scale(0.99); }
 .pml-icon {
-  width: 36px; height: 36px; min-width: 36px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 22px;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 8px;
-}
+      width: 36px; height: 36px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: transparent; border: none; border-radius: 0;
+      overflow: hidden;
+    }
 .pml-text { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .pml-title { font-size: 14px; font-weight: 600; color: var(--white); }
 .pml-sub { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2206,9 +2456,8 @@
             <span class="pair-badge">Perp</span>
             <span class="arrow">▼</span>
           </div>
-          <div class="pair-menu">
+          <div class="pair-menu" id="pairMenu">
             <div class="pair-item active" data-pair="BTC-USDT">BTC/USDT</div>
-            <div class="pair-item" data-pair="ETH-USDT">ETH/USDT</div>
           </div>
         </div>
       </div>
@@ -2510,6 +2759,38 @@
     </main>
   </div>
 
+  <div id="view-markets" class="view-section hidden">
+    <div class="markets-container">
+      <div class="markets-topbar">
+        <div>
+          <div class="markets-title">Markets</div>
+          <div class="markets-subtitle">Live pairs and 24h change</div>
+        </div>
+        <div class="markets-count" id="marketsCount">0 pairs</div>
+      </div>
+      <div class="markets-tabs">
+        <button class="markets-tab active" data-market-filter="all" type="button">All</button>
+        <button class="markets-tab" data-market-filter="favorites" type="button">Favorites</button>
+      </div>
+      <div class="markets-controls">
+        <div class="markets-sort-dropdown" id="marketsSortDropdown">
+          <button class="markets-sort-trigger" id="marketsSortTrigger" type="button" aria-label="Markets sort">
+            <span id="marketsSortText">Popularity</span>
+            <span class="arrow">▼</span>
+          </button>
+          <div class="markets-sort-menu" id="marketsSortMenu">
+            <button class="markets-sort-item active" data-sort="popularity-desc" type="button">Popularity</button>
+            <button class="markets-sort-item" data-sort="market-cap-desc" type="button">Market Cap: High to Low</button>
+            <button class="markets-sort-item" data-sort="market-cap-asc" type="button">Market Cap: Low to High</button>
+            <button class="markets-sort-item" data-sort="gainers-desc" type="button">Top Gainers 24h</button>
+            <button class="markets-sort-item" data-sort="losers-asc" type="button">Top Losers 24h</button>
+          </div>
+        </div>
+      </div>
+      <div class="markets-list" id="marketsList"></div>
+    </div>
+  </div>
+
   <div id="view-profile" class="view-section hidden">
     <div class="profile-container">
       <div class="pro-header">
@@ -2537,7 +2818,7 @@
       </div>
       <div class="profile-menu-list">
         <div class="pml-item" id="btnMenuEarn">
-          <div class="pml-icon">💰</div>
+          <div class="pml-icon"><img src="https://i.postimg.cc/rpcY5BxT/earn.png" alt="Earn" style="width:100%; height:100%; object-fit:contain; display:block;"></div>
           <div class="pml-text">
             <div class="pml-title">Earn</div>
             <div class="pml-sub">Liquidity Pool · Passive income</div>
@@ -2545,7 +2826,7 @@
           <div class="pml-arrow">›</div>
         </div>
         <div class="pml-item" id="btnMenuStats">
-          <div class="pml-icon">📊</div>
+          <div class="pml-icon"><img src="https://i.postimg.cc/LsTQDx32/trading-stats.png" alt="Trading Stats" style="width:100%; height:100%; object-fit:contain; display:block;"></div>
           <div class="pml-text">
             <div class="pml-title">Trading Stats</div>
             <div class="pml-sub">Performance & trade history</div>
@@ -2553,7 +2834,7 @@
           <div class="pml-arrow">›</div>
         </div>
         <div class="pml-item" id="btnMenuReferrals">
-          <div class="pml-icon">👥</div>
+          <div class="pml-icon"><img src="https://i.postimg.cc/cJmkhFBG/refferals.png" alt="Referrals" style="width:100%; height:100%; object-fit:contain; display:block;"></div>
           <div class="pml-text">
             <div class="pml-title">Referrals</div>
             <div class="pml-sub">Invite friends · Earn rewards</div>
@@ -2561,7 +2842,7 @@
           <div class="pml-arrow">›</div>
         </div>
         <div class="pml-item" id="btnMenuRewards">
-          <div class="pml-icon">🎁</div>
+          <div class="pml-icon"><img src="https://i.postimg.cc/5t3KgsSM/rewards.png" alt="Rewards" style="width:100%; height:100%; object-fit:contain; display:block;"></div>
           <div class="pml-text">
             <div class="pml-title">Rewards</div>
             <div class="pml-sub">Tasks · Achievements</div>
@@ -2628,7 +2909,13 @@
   </div>
 
   <div id="view-rewards" class="view-section hidden">
-    <div class="rewards-container">
+    <div class="profile-container rewards-container">
+      <div class="pro-header">
+        <div class="pro-user">
+          <div style="font-size: 18px; font-weight: 700; color: var(--white);">Rewards</div>
+        </div>
+        <div class="btn-close" id="btnBackFromRewards" style="color:var(--muted); padding:8px; cursor:pointer;">✕</div>
+      </div>
       <div class="rewards-header">
         <div class="rh-title">Achievement Progress</div>
         <div class="rh-sub">Watch ads & earn rewards</div>
@@ -2655,9 +2942,23 @@
           </div>
         </div>
       </div>
-      <button class="btn-back-float" id="btnBackFromRewards">Back to Profile</button>
     </div>
   </div>
+
+  <nav class="bottom-nav" id="bottomNav" aria-label="Main navigation">
+    <button class="bottom-nav-btn active" data-view="view-trade" type="button" aria-label="Trade">
+      <img src="https://i.postimg.cc/1XBgxYS7/trade.png" alt="" aria-hidden="true">
+      <span>Trade</span>
+    </button>
+    <button class="bottom-nav-btn" data-view="view-markets" type="button" aria-label="Markets">
+      <img src="https://i.postimg.cc/HnzJGPHC/Markets.png" alt="" aria-hidden="true">
+      <span>Markets</span>
+    </button>
+    <button class="bottom-nav-btn" data-view="view-profile" type="button" aria-label="Profile">
+      <img src="https://i.postimg.cc/SRdX0tqb/Profile.png" alt="" aria-hidden="true">
+      <span>Profile</span>
+    </button>
+  </nav>
 
 </div>
 
@@ -2928,14 +3229,59 @@
 
     const APP_CONFIG = window.__APP_CONFIG__ || {};
     const WSS_PRICE_URL = APP_CONFIG.WSS_PRICE_URL || "wss://gitlabebanayahuyna-project.onrender.com";
-    const API_BASE = APP_CONFIG.API_BASE || "https://gitlabebanayahuyna-project-1.onrender.com";
-    const ALL_PAIRS = ["BTC-USDT", "ETH-USDT"];
-    const AUTH_FETCH_OPTIONS = { credentials: 'include' };
+    const DEFAULT_API_BASE = "https://gitlabebanayahuyna-project-1.onrender.com";
+    let API_BASE = APP_CONFIG.API_BASE || window.location.origin;
+    const ALL_PAIRS = ["BTC-USDT", "ETH-USDT", "SOL-USDT", "BNB-USDT", "XRP-USDT", "DOGE-USDT", "ADA-USDT", "LINK-USDT", "SUI-USDT", "XAUT-USDT"];
+    const AUTH_FETCH_OPTIONS = { credentials: 'same-origin' };
+    const API_SESSION_TOKEN_KEY = 'trade-sim-api-session-token-v1';
+    let apiSessionToken = "";
     let wsAuthToken = null;
 
-    function authFetch(url, options = {}) {
-      return fetch(url, { ...AUTH_FETCH_OPTIONS, ...options, credentials: 'include' });
+    function readApiSessionToken() {
+      try { return localStorage.getItem(API_SESSION_TOKEN_KEY) || ""; } catch (e) { return ""; }
     }
+
+    function writeApiSessionToken(token) {
+      apiSessionToken = String(token || "");
+      try {
+        if (apiSessionToken) localStorage.setItem(API_SESSION_TOKEN_KEY, apiSessionToken);
+        else localStorage.removeItem(API_SESSION_TOKEN_KEY);
+      } catch (e) {}
+    }
+
+    function getAuthFetchCredentials(url) {
+      try {
+        return new URL(url, window.location.href).origin === window.location.origin ? 'include' : 'omit';
+      } catch (e) {
+        return 'same-origin';
+      }
+    }
+
+    function authFetch(url, options = {}) {
+      const headers = new Headers(options.headers || {});
+      if (apiSessionToken && !headers.has('Authorization')) {
+        headers.set('Authorization', `Bearer ${apiSessionToken}`);
+      }
+      const credentials = options.credentials || getAuthFetchCredentials(url);
+      return fetch(url, { ...AUTH_FETCH_OPTIONS, ...options, credentials, headers });
+    }
+
+    async function readJsonResponse(res) {
+      const contentType = res.headers.get('content-type') || "";
+      if (contentType.includes('application/json')) {
+        return res.json();
+      }
+
+      const text = await res.text();
+      return {
+        ok: false,
+        error: res.status === 404 ? 'API_NOT_FOUND' : 'NON_JSON_RESPONSE',
+        status: res.status,
+        bodyPreview: text.slice(0, 120)
+      };
+    }
+
+    writeApiSessionToken(readApiSessionToken());
 
     const ADSGRAM_BLOCK_ID = "22326";
     const VP_TO_USD_RATE = 0.005;
@@ -3093,6 +3439,15 @@
     let currentUserId = null;
     let selectedPair = "BTC-USDT";
     let marketPrices = {};
+    let marketChanges24h = {};
+    let marketQuoteVolumes24h = {};
+    let marketCaps = {};
+    let marketCapsLoadedAt = 0;
+    let marketFilterMode = 'all';
+    let marketSortMode = 'popularity-desc';
+    let favoriteMarkets = new Set();
+    let favoriteMarketsSaving = false;
+    let favoriteMarketsSaveSeq = 0;
     let currentTimeframe = 60;
     let localCandles = [];
     let localVolumes = [];
@@ -3160,8 +3515,13 @@
     };
 
     let historyResolve = null;
+    let lastCandle = null;
 
-    const tg = window.Telegram?.WebApp;
+    function getTelegramWebApp() {
+      return window.Telegram?.WebApp || null;
+    }
+
+    const tg = getTelegramWebApp();
     if(tg) {
       tg.ready();
       try { tg.expand(); } catch(e){}
@@ -3297,12 +3657,50 @@
       updateWatchAdButton();
     }
 
-    function formatPrice(val) {
+    const PAIR_PRICE_PRECISION = {
+      "BTC-USDT": 2,
+      "ETH-USDT": 2,
+      "BNB-USDT": 2,
+      "SOL-USDT": 3,
+      "XRP-USDT": 4,
+      "ADA-USDT": 4,
+      "DOGE-USDT": 5,
+      "LINK-USDT": 3,
+      "SUI-USDT": 4,
+      "XAUT-USDT": 2
+    };
+
+    function getPricePrecision(pair = selectedPair, value = null) {
+      const num = Number(value);
+      if (Number.isFinite(num) && num > 0) {
+        if (num < 0.01) return 6;
+        if (num < 1) return 5;
+        if (num < 10) return 4;
+        if (num < 100) return 3;
+        return 2;
+      }
+      return PAIR_PRICE_PRECISION[normalizePair(pair)] ?? 2;
+    }
+
+    function getPriceMinMove(precision) {
+      return Number(`1e-${Math.max(0, Number(precision) || 0)}`);
+    }
+
+    function getSeriesPriceFormat(pair = selectedPair, value = null) {
+      const precision = getPricePrecision(pair, value);
+      return { type: 'price', precision, minMove: getPriceMinMove(precision) };
+    }
+
+    function formatPrice(val, pair = selectedPair) {
       const num = Number(val);
       if(isNaN(num)) return "--.--";
-      if(num < 1) return num.toFixed(5);
-      if(num < 10) return num.toFixed(4);
-      return num.toFixed(2);
+      return num.toFixed(getPricePrecision(pair, num));
+    }
+
+    function getOrderBookPriceKey(price, pair = selectedPair) {
+      const num = Number(price);
+      if (!Number.isFinite(num)) return null;
+      return num.toFixed(getPricePrecision(pair, num));
     }
 
     function formatUSD(vpAmount) { return (Number(vpAmount) * VP_TO_USD_RATE).toFixed(2); }
@@ -3526,6 +3924,223 @@
       return String(pair || '').replace('-', '/').toUpperCase();
     }
 
+    const MARKET_META = {
+      "BTC-USDT": { geckoId: "bitcoin", marketCap: 1300000000000, popularityRank: 1 },
+      "ETH-USDT": { geckoId: "ethereum", marketCap: 420000000000, popularityRank: 2 },
+      "BNB-USDT": { geckoId: "binancecoin", marketCap: 90000000000, popularityRank: 4 },
+      "SOL-USDT": { geckoId: "solana", marketCap: 80000000000, popularityRank: 3 },
+      "XRP-USDT": { geckoId: "ripple", marketCap: 60000000000, popularityRank: 5 },
+      "DOGE-USDT": { geckoId: "dogecoin", marketCap: 25000000000, popularityRank: 7 },
+      "ADA-USDT": { geckoId: "cardano", marketCap: 20000000000, popularityRank: 8 },
+      "LINK-USDT": { geckoId: "chainlink", marketCap: 11000000000, popularityRank: 9 },
+      "SUI-USDT": { geckoId: "sui", marketCap: 12000000000, popularityRank: 6 },
+      "XAUT-USDT": { geckoId: "tether-gold", marketCap: 800000000, popularityRank: 10 }
+    };
+
+    function formatCompactUsd(value) {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num <= 0) return '--';
+      if (num >= 1000000000000) return `$${(num / 1000000000000).toFixed(2)}T`;
+      if (num >= 1000000000) return `$${(num / 1000000000).toFixed(2)}B`;
+      if (num >= 1000000) return `$${(num / 1000000).toFixed(2)}M`;
+      if (num >= 1000) return `$${(num / 1000).toFixed(2)}K`;
+      return `$${num.toFixed(0)}`;
+    }
+
+    function getMarketCap(pair) {
+      const normalized = normalizePair(pair);
+      return Number(marketCaps[normalized] || MARKET_META[normalized]?.marketCap || 0);
+    }
+
+    function getMarketPopularityValue(pair) {
+      const normalized = normalizePair(pair);
+      const quoteVolume = Number(marketQuoteVolumes24h[normalized]);
+      if (Number.isFinite(quoteVolume) && quoteVolume > 0) return quoteVolume;
+      const rank = Number(MARKET_META[normalized]?.popularityRank || 999);
+      return 1000 - rank;
+    }
+
+    function compareMarketNumber(a, b, getter, direction = 'desc', allowNegative = false) {
+      const av = Number(getter(a));
+      const bv = Number(getter(b));
+      const aValid = Number.isFinite(av) && (allowNegative || av > 0);
+      const bValid = Number.isFinite(bv) && (allowNegative || bv > 0);
+      if (aValid && !bValid) return -1;
+      if (!aValid && bValid) return 1;
+      if (!aValid && !bValid) return a.localeCompare(b);
+      return direction === 'asc' ? av - bv : bv - av;
+    }
+
+    function sortMarketPairs(pairs) {
+      const sorted = [...pairs];
+      sorted.sort((a, b) => {
+        if (marketSortMode === 'market-cap-desc') return compareMarketNumber(a, b, getMarketCap, 'desc');
+        if (marketSortMode === 'market-cap-asc') return compareMarketNumber(a, b, getMarketCap, 'asc');
+        if (marketSortMode === 'gainers-desc') return compareMarketNumber(a, b, pair => marketChanges24h[pair], 'desc', true);
+        if (marketSortMode === 'losers-asc') return compareMarketNumber(a, b, pair => marketChanges24h[pair], 'asc', true);
+        return compareMarketNumber(a, b, getMarketPopularityValue, 'desc');
+      });
+      return sorted;
+    }
+
+    async function loadMarketCaps(force = false) {
+      const now = Date.now();
+      if (!force && marketCapsLoadedAt && now - marketCapsLoadedAt < 10 * 60 * 1000) return;
+      const ids = [...new Set(ALL_PAIRS.map(pair => MARKET_META[pair]?.geckoId).filter(Boolean))].join(',');
+      if (!ids) return;
+      try {
+        const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${encodeURIComponent(ids)}&order=market_cap_desc&per_page=250&page=1&sparkline=false`;
+        const res = await fetch(url, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`CoinGecko ${res.status}`);
+        const data = await res.json();
+        if (!Array.isArray(data)) return;
+        data.forEach(coin => {
+          const pair = ALL_PAIRS.find(p => MARKET_META[p]?.geckoId === coin.id);
+          const cap = Number(coin.market_cap);
+          if (pair && Number.isFinite(cap) && cap > 0) marketCaps[pair] = cap;
+        });
+        marketCapsLoadedAt = Date.now();
+        if ($('view-markets')?.classList.contains('active')) renderMarkets();
+      } catch (e) {
+        console.warn("Market cap fetch error", e);
+        marketCapsLoadedAt = Date.now();
+      }
+    }
+
+    const MARKET_FAVORITES_KEY = 'trade-sim-market-favorites-v1';
+
+    function readFavoriteMarkets() {
+      try {
+        const raw = localStorage.getItem(MARKET_FAVORITES_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(parsed)) return new Set();
+        return new Set(parsed.map(normalizePair).filter(pair => ALL_PAIRS.includes(pair)));
+      } catch (e) {
+        return new Set();
+      }
+    }
+
+    function writeFavoriteMarketsCache() {
+      try {
+        localStorage.setItem(MARKET_FAVORITES_KEY, JSON.stringify([...favoriteMarkets]));
+      } catch (e) {}
+    }
+
+    function applyFavoriteMarkets(pairs) {
+      favoriteMarkets = new Set(normalizeMarketFavoritePairs(pairs));
+      writeFavoriteMarketsCache();
+      renderMarkets();
+    }
+
+    function normalizeMarketFavoritePairs(pairs) {
+      const out = [];
+      (Array.isArray(pairs) ? pairs : []).forEach(pair => {
+        const normalized = normalizePair(pair);
+        if (ALL_PAIRS.includes(normalized) && !out.includes(normalized)) out.push(normalized);
+      });
+      return out;
+    }
+
+    async function loadFavoriteMarkets() {
+      if (!currentUserId) return;
+      try {
+        const res = await authFetch(API_BASE + "/api/user/market-favorites");
+        const data = await res.json();
+        if (data.ok && Array.isArray(data.favorites)) applyFavoriteMarkets(data.favorites);
+      } catch (e) {
+        console.error("Market favorites fetch error", e);
+      }
+    }
+
+    async function saveFavoriteMarketsToServer() {
+      if (!currentUserId) return;
+      const saveSeq = ++favoriteMarketsSaveSeq;
+      favoriteMarketsSaving = true;
+      try {
+        const res = await authFetch(API_BASE + "/api/user/market-favorites", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ favorites: [...favoriteMarkets] })
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "MARKET_FAVORITES_SAVE_FAILED");
+        if (saveSeq === favoriteMarketsSaveSeq) applyFavoriteMarkets(data.favorites || [...favoriteMarkets]);
+      } catch (e) {
+        console.error("Market favorites save error", e);
+        showToast("Favorites sync failed", "error");
+      } finally {
+        if (saveSeq === favoriteMarketsSaveSeq) favoriteMarketsSaving = false;
+      }
+    }
+
+    function toggleFavoriteMarket(pair) {
+      const normalized = normalizePair(pair);
+      if (!ALL_PAIRS.includes(normalized)) return;
+      if (favoriteMarkets.has(normalized)) favoriteMarkets.delete(normalized);
+      else favoriteMarkets.add(normalized);
+      writeFavoriteMarketsCache();
+      renderMarkets();
+      saveFavoriteMarketsToServer();
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+    }
+
+    function getMarketChangeClass(changePct) {
+      const value = Number(changePct);
+      if (!Number.isFinite(value)) return 'neutral';
+      if (value > 0) return 'positive';
+      if (value < 0) return 'negative';
+      return 'neutral';
+    }
+
+    function renderMarkets() {
+      const list = $('marketsList');
+      const countEl = $('marketsCount');
+      if (!list) return;
+
+      const pairs = ALL_PAIRS.filter(pair => marketFilterMode !== 'favorites' || favoriteMarkets.has(pair));
+      if (countEl) countEl.textContent = `${pairs.length} ${pairs.length === 1 ? 'pair' : 'pairs'}`;
+      list.innerHTML = '';
+
+      if (!pairs.length) {
+        list.innerHTML = '<div class="markets-empty">No favorite markets yet</div>';
+        return;
+      }
+
+      const sortedPairs = sortMarketPairs(pairs);
+
+      sortedPairs.forEach(pair => {
+        const price = Number(marketPrices[pair]);
+        const changePct = Number(marketChanges24h[pair]);
+        const marketCap = getMarketCap(pair);
+        const quoteVolume = Number(marketQuoteVolumes24h[pair]);
+        const changeText = Number.isFinite(changePct) ? `${changePct > 0 ? '+' : ''}${changePct.toFixed(2)}%` : '--';
+        const row = document.createElement('button');
+        row.className = `market-row${normalizePair(selectedPair) === pair ? ' active' : ''}`;
+        row.type = 'button';
+        row.dataset.pair = pair;
+        row.innerHTML = `
+          <span class="market-favorite${favoriteMarkets.has(pair) ? ' active' : ''}" title="Favorite" aria-label="Toggle favorite" role="button">&#9733;</span>
+          <span class="market-main">
+            <span class="market-symbol">${getPairLabel(pair)}</span>
+            <span class="market-price">${Number.isFinite(price) ? formatPrice(price, pair) : '--.--'} USDT</span>
+            <span class="market-meta">Cap ${formatCompactUsd(marketCap)} · Vol ${formatCompactUsd(quoteVolume)}</span>
+          </span>
+          <span class="market-change ${getMarketChangeClass(changePct)}">${changeText}</span>
+        `;
+        row.querySelector('.market-favorite')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          toggleFavoriteMarket(pair);
+        });
+        row.addEventListener('click', () => {
+          if (normalizePair(selectedPair) !== pair) switchPair(pair);
+          showView('view-trade');
+        });
+        list.appendChild(row);
+      });
+    }
+
+    favoriteMarkets = readFavoriteMarkets();
+
     function updateIndicatorCountBadge() {
       const count = Object.values(indicatorState).filter(Boolean).length;
       const badge = $('indicatorActiveCount');
@@ -3571,7 +4186,7 @@
       list.innerHTML = '';
 
       if (!alerts.length) {
-        list.innerHTML = '<div class="alerts-empty">No active alerts yet. Create one for BTC or ETH.</div>';
+        list.innerHTML = '<div class="alerts-empty">No active alerts yet. Create one for any supported pair.</div>';
         return;
       }
 
@@ -4484,9 +5099,15 @@
     function showView(viewId) {
       document.querySelectorAll('.view-section').forEach(el => { el.classList.remove('active'); el.classList.add('hidden'); });
       const target = $(viewId); target.classList.remove('hidden'); target.classList.add('active');
+      document.querySelectorAll('.bottom-nav-btn').forEach(btn => {
+        const btnView = btn.dataset.view;
+        const isProfileChild = ['view-stats', 'view-referrals', 'view-rewards'].includes(viewId) && btnView === 'view-profile';
+        btn.classList.toggle('active', btnView === viewId || isProfileChild);
+      });
       if (viewId === 'view-trade') { if(tg) tg.BackButton.hide(); }
       else { if(tg) tg.BackButton.show(); }
       if (viewId === 'view-rewards') { loadAdStats(); }
+      if (viewId === 'view-markets') { renderMarkets(); loadMarketCaps(); }
     }
 
     $('btnProfile').onclick = () => { renderProfile(); showView('view-profile'); };
@@ -4500,10 +5121,65 @@
     $('btnBackFromRewards').onclick = () => showView('view-profile');
     $('btnWatchAd').onclick = () => showRewardedAd();
 
+    document.querySelectorAll('.bottom-nav-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const viewId = btn.dataset.view;
+        if (!viewId) return;
+        if (viewId === 'view-profile') {
+          await renderProfile();
+          showView('view-profile');
+          return;
+        }
+        if (viewId === 'view-markets') { renderMarkets(); loadMarketCaps(); }
+        showView(viewId);
+      });
+    });
+
+    function syncMarketsSortDropdown() {
+      const text = $('marketsSortText');
+      const activeItem = document.querySelector(`.markets-sort-item[data-sort="${marketSortMode}"]`);
+      if (text && activeItem) text.textContent = activeItem.textContent;
+      document.querySelectorAll('.markets-sort-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.sort === marketSortMode);
+      });
+    }
+
+    const marketsSortDropdown = $('marketsSortDropdown');
+    const marketsSortTrigger = $('marketsSortTrigger');
+    if (marketsSortDropdown && marketsSortTrigger) {
+      marketsSortTrigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        marketsSortDropdown.classList.toggle('open');
+      });
+      document.querySelectorAll('.markets-sort-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+          e.stopPropagation();
+          marketSortMode = item.dataset.sort || 'popularity-desc';
+          syncMarketsSortDropdown();
+          marketsSortDropdown.classList.remove('open');
+          renderMarkets();
+          if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+        });
+      });
+      document.addEventListener('click', () => marketsSortDropdown.classList.remove('open'));
+      syncMarketsSortDropdown();
+    }
+
+    document.querySelectorAll('.markets-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.markets-tab').forEach(tab => tab.classList.remove('active'));
+        btn.classList.add('active');
+        marketFilterMode = btn.dataset.marketFilter || 'all';
+        renderMarkets();
+      });
+    });
+
     if(tg) { tg.BackButton.onClick(() => {
       const vp = $('view-profile');
+      const markets = $('view-markets');
       const subViews = ['view-stats', 'view-referrals', 'view-rewards'];
       for (const id of subViews) { if ($(id) && $(id).classList.contains('active')) { showView('view-profile'); return; } }
+      if (markets && markets.classList.contains('active')) { showView('view-trade'); return; }
       if (vp && vp.classList.contains('active')) { showView('view-trade'); return; }
     }); }
 
@@ -4597,22 +5273,40 @@
     }
 
     const pairDropdown = $('pairDropdown'), pairTrigger = $('pairTrigger'), triggerText = $('triggerText');
-    const pairItems = document.querySelectorAll('.pair-item');
+
+    function buildPairMenu() {
+      const menu = $('pairMenu');
+      if (!menu) return;
+      menu.innerHTML = ALL_PAIRS.map(pair => `<div class="pair-item${normalizePair(pair) === normalizePair(selectedPair) ? ' active' : ''}" data-pair="${pair}">${getPairLabel(pair)}</div>`).join('');
+      menu.querySelectorAll('.pair-item').forEach(item => {
+        item.addEventListener('click', () => {
+          const newPair = normalizePair(item.dataset.pair);
+          if (newPair === normalizePair(selectedPair)) {
+            pairDropdown.classList.remove('open');
+            return;
+          }
+          switchPair(newPair);
+          pairDropdown.classList.remove('open');
+        });
+      });
+    }
 
     pairTrigger.addEventListener('click', (e) => { e.stopPropagation(); pairDropdown.classList.toggle('open'); });
     document.addEventListener('click', () => pairDropdown.classList.remove('open'));
-
-    pairItems.forEach(item => {
-      item.addEventListener('click', () => {
-        const newPair = item.dataset.pair; if(newPair === selectedPair) return;
-        pairItems.forEach(i => i.classList.remove('active')); item.classList.add('active');
-        triggerText.textContent = item.textContent; switchPair(newPair);
-      });
-    });
+    buildPairMenu();
 
     function switchPair(newPair) {
-      selectedPair = newPair; $('bookPairLabel').textContent = selectedPair;
+      selectedPair = normalizePair(newPair); $('bookPairLabel').textContent = selectedPair;
+      if (triggerText) triggerText.textContent = getPairLabel(selectedPair);
+      buildPairMenu();
+      applySelectedPairPriceFormat();
       $('priceDisplay').textContent = marketPrices[selectedPair] ? formatPrice(marketPrices[selectedPair]) : "--.--";
+      const cachedChange = Number(marketChanges24h[selectedPair]);
+      const changeEl = $('priceChange24h');
+      if (changeEl) {
+        changeEl.textContent = Number.isFinite(cachedChange) ? `${cachedChange > 0 ? '+' : ''}${cachedChange.toFixed(2)}%` : '+0.00%';
+        changeEl.className = `price-change ${cachedChange >= 0 || !Number.isFinite(cachedChange) ? 'text-green' : 'text-red'}`;
+      }
       $('orderBook').innerHTML = ''; $('tradeHistory').innerHTML = ""; localTrades = [];
       candleSeries.setData([]); lastCandle = null; localCandles = []; localVolumes = [];
       isLoadingMoreHistory = false; allOlderHistoryLoaded = false; lastLoadMoreUntil = null; lockedLeftBoundary = null;
@@ -4624,7 +5318,8 @@
       clearAllDrawings();
       if (volumeHistogramSeries) volumeHistogramSeries.setData([]);
       syncAlertsFormToSelection(newPair);
-      if (socket && socket.readyState === WebSocket.OPEN) { socket.send(JSON.stringify({ type: "subscribe", pair: newPair, timeframe: currentTimeframe })); }
+      renderMarkets();
+      if (socket && socket.readyState === WebSocket.OPEN) { socket.send(JSON.stringify({ type: "subscribe", pair: selectedPair, timeframe: currentTimeframe })); }
     }
 
     function changeTimeframe(newTimeframe) {
@@ -4650,6 +5345,7 @@
     const chart = LightweightCharts.createChart(chartEl, {
       width: chartEl.clientWidth, height: chartEl.clientHeight,
       layout: { background: { type: 'solid', color: '#0B0E11' }, textColor: '#5E6673', attributionLogo: false },
+      localization: { priceFormatter: (price) => formatPrice(price) },
       grid: { horzLines: { color: 'rgba(255,255,255,0.03)' }, vertLines: { color: 'rgba(255,255,255,0.03)' } },
       rightPriceScale: { borderVisible: false, autoScale: true, minimumWidth: 60, scaleMargins: { top: 0.1, bottom: 0.1 } },
       timeScale: { borderVisible: false, timeVisible: true, rightOffset: 5 },
@@ -4658,8 +5354,17 @@
 
     let candleSeries = chart.addCandlestickSeries({
       upColor: '#0ECB81', borderUpColor: '#0ECB81', wickUpColor: '#0ECB81',
-      downColor: '#F6465D', borderDownColor: '#F6465D', wickDownColor: '#F6465D'
+      downColor: '#F6465D', borderDownColor: '#F6465D', wickDownColor: '#F6465D',
+      priceFormat: getSeriesPriceFormat()
     });
+
+    function applySelectedPairPriceFormat(value = null) {
+      if (!candleSeries) return;
+      const format = getSeriesPriceFormat(selectedPair, value ?? marketPrices[selectedPair] ?? lastCandle?.close);
+      candleSeries.applyOptions({ priceFormat: format });
+      chart.applyOptions({ localization: { priceFormatter: (price) => formatPrice(price, selectedPair) } });
+      requestAnimationFrame(syncPriceScaleWidths);
+    }
 
     volumeChartInstance = LightweightCharts.createChart(volumeChartEl, {
       width: volumeChartEl.clientWidth, height: volumeChartEl.clientHeight,
@@ -4684,6 +5389,7 @@
         volumeChartInstance.priceScale('right').applyOptions({ minimumWidth: target });
       } catch (e) {}
     }
+    applySelectedPairPriceFormat();
 
     let isSyncingLogicalRange = false;
     let isUserScrolledAway = false; // FIX: track if user scrolled left away from latest bar
@@ -5309,15 +6015,67 @@
       }
     }
 
+    function wait(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async function getTelegramInitDataWithRetry() {
+      for (let attempt = 0; attempt < 12; attempt++) {
+        const app = getTelegramWebApp();
+        const initData = app?.initData || "";
+        if (initData) return initData;
+        await wait(150);
+      }
+      return getTelegramWebApp()?.initData || "";
+    }
+
+    async function postInitSession(initData) {
+      const payload = JSON.stringify(initData ? {initData} : {});
+      const initOptions = {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: payload
+      };
+
+      const candidates = [API_BASE, window.location.origin, DEFAULT_API_BASE]
+        .filter(Boolean)
+        .map(base => String(base).replace(/\/+$/, ""));
+      const uniqueCandidates = [...new Set(candidates)];
+      let lastData = null;
+
+      for (const base of uniqueCandidates) {
+        let data;
+        try {
+          const res = await authFetch(base + "/api/init", initOptions);
+          data = await readJsonResponse(res);
+        } catch (e) {
+          data = { ok: false, error: 'NETWORK_ERROR', message: e.message };
+        }
+
+        lastData = data;
+        if (data.ok || data.error === 'NO_SESSION' || data.error === 'UNAUTHORIZED' || data.error === 'INVALID_SIGNATURE' || data.error === 'NO_USER') {
+          API_BASE = base;
+          return data;
+        }
+      }
+
+      return lastData || { ok: false, error: 'API_UNAVAILABLE' };
+    }
+
     async function initSession() {
       try {
-        let initData = tg?.initData || "";
-        let res = await authFetch(API_BASE + "/api/init", {
-          method: "POST", headers: {"Content-Type":"application/json"},
-          body: JSON.stringify(initData ? {initData} : {})
-        });
-        let data = await res.json();
+        let initData = await getTelegramInitDataWithRetry();
+        let data = await postInitSession(initData);
+
+        if (!data.ok && (data.error === 'NO_SESSION' || data.error === 'UNAUTHORIZED') && !initData) {
+          initData = await getTelegramInitDataWithRetry();
+          if (initData) {
+            data = await postInitSession(initData);
+          }
+        }
+
         if(data.ok && data.user) {
+          if (data.sessionToken) writeApiSessionToken(data.sessionToken);
           currentUserId = data.user.user_id;
           profile.balance = Number(data.user.balance || 0);
           profile.name = data.user.first_name || "User";
@@ -5347,6 +6105,11 @@
             } catch(e) {}
           }
           renderLimitOrders();
+          if (Array.isArray(data.marketFavorites)) {
+            applyFavoriteMarkets(data.marketFavorites);
+          } else {
+            await loadFavoriteMarkets();
+          }
           priceAlerts = readCachedPriceAlerts(currentUserId);
           renderPriceAlerts();
           await loadPriceAlerts();
@@ -5357,12 +6120,13 @@
             $('avatarImg').style.display = 'block';
           }
           updateBalanceUI(); updateRewardsUI(); renderPositions(true);
+        } else if (data.error === 'NO_SESSION' || data.error === 'UNAUTHORIZED') {
+          writeApiSessionToken("");
         }
       } catch(e) { console.error(e); }
     }
 
     let socket = null;
-    let lastCandle = null;
 
     function connectWS() {
       socket = new WebSocket(WSS_PRICE_URL);
@@ -5471,9 +6235,13 @@
         if (msg.type === "price" && msg.pair && msg.price) {
           const pairNorm = normalizePair(msg.pair);
           marketPrices[pairNorm] = Number(msg.price);
+          if (msg.changePct !== undefined) marketChanges24h[pairNorm] = Number(msg.changePct);
+          if (msg.quoteVolume24h !== undefined) marketQuoteVolumes24h[pairNorm] = Number(msg.quoteVolume24h);
+          if ($('view-markets')?.classList.contains('active')) renderMarkets();
 
           if (pairNorm === normalizePair(selectedPair)) {
             const currentPrice = Number(msg.price);
+            applySelectedPairPriceFormat(currentPrice);
             $('priceDisplay').textContent = formatPrice(currentPrice);
 
             // ОБНОВЛЕНИЕ БЛОКА 24H СТАТИСТИКИ
@@ -5510,13 +6278,36 @@
                   }
                 }
               } else {
-                lastCandle = { time: candleTime, open: lastCandle.close, high: currentPrice, low: currentPrice, close: currentPrice, volume: 0 };
-                localCandles.push(lastCandle);
-                safeUpdateCandle(lastCandle);
-                const newVol = { time: candleTime, value: computeCandleVolume(lastCandle), color: 'rgba(14, 203, 129, 0.5)' };
-                localVolumes.push(newVol);
-                if (indicatorState.volume && volumeHistogramSeries) volumeHistogramSeries.update(newVol);
-                updateIndicators();
+                // FIX: Detect gap between lastCandle and the new candle slot.
+                // A gap means the WS connection missed ticks (tab backgrounded, sleep, network drop).
+                // Without this fix, the new candle opens at the stale lastCandle.close and renders huge.
+                const expectedNextTime = lastCandle.time + currentTimeframe;
+                const gapSlots = Math.round((candleTime - expectedNextTime) / currentTimeframe);
+                if (gapSlots > 0) {
+                  // Gap detected — open new candle at currentPrice (not stale close) so it doesn't render huge,
+                  // and re-subscribe so server re-sends fresh history covering the gap.
+                  lastCandle = { time: candleTime, open: currentPrice, high: currentPrice, low: currentPrice, close: currentPrice, volume: 0 };
+                  localCandles.push(lastCandle);
+                  safeUpdateCandle(lastCandle);
+                  const newVol = { time: candleTime, value: computeCandleVolume(lastCandle), color: 'rgba(14, 203, 129, 0.5)' };
+                  localVolumes.push(newVol);
+                  if (indicatorState.volume && volumeHistogramSeries) volumeHistogramSeries.update(newVol);
+                  updateIndicators();
+                  try {
+                    if (socket && socket.readyState === WebSocket.OPEN) {
+                      socket.send(JSON.stringify({ type: "subscribe", pair: selectedPair, timeframe: currentTimeframe }));
+                    }
+                  } catch(e) { console.warn('gap re-subscribe failed', e); }
+                } else {
+                  // Normal next-candle rollover (no gap).
+                  lastCandle = { time: candleTime, open: lastCandle.close, high: currentPrice, low: currentPrice, close: currentPrice, volume: 0 };
+                  localCandles.push(lastCandle);
+                  safeUpdateCandle(lastCandle);
+                  const newVol = { time: candleTime, value: computeCandleVolume(lastCandle), color: 'rgba(14, 203, 129, 0.5)' };
+                  localVolumes.push(newVol);
+                  if (indicatorState.volume && volumeHistogramSeries) volumeHistogramSeries.update(newVol);
+                  updateIndicators();
+                }
               }
             }
           }
@@ -5565,30 +6356,94 @@
 
         if (msg.type === "history") {
           if (msg.timeframe && Number(msg.timeframe) !== Number(currentTimeframe)) return;
-          const data = msg.data.map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume || 0 }));
-          localCandles = data;
-          localVolumes = buildVolumeData(data);
-          candleSeries.setData(data);
+
+          // Дедупликация и сортировка входящих свечей — защита от дублей с сервера
+          const rawData = msg.data.map(c => ({
+            time: c.time,
+            open: Number(c.open),
+            high: Number(c.high),
+            low: Number(c.low),
+            close: Number(c.close),
+            volume: Number(c.volume) || 0
+          }));
+
+          // Удаляем дубли по timestamp, оставляем последнее вхождение (более свежее)
+          const deduped = new Map();
+          for (const c of rawData) deduped.set(c.time, c);
+          const data = Array.from(deduped.values()).sort((a, b) => a.time - b.time);
+
+          if (data.length === 0) return;
+
+          const now = Math.floor(Date.now() / 1000);
+          const currentCandleTime = now - (now % currentTimeframe);
+
+          // Проверяем: сервер мог включить в историю незакрытую текущую свечу.
+          // Такая свеча имеет частичные данные (high/low ещё не финальные).
+          // Мы её берём как lastCandle, но ОБНОВЛЯЕМ её данные текущей ценой позднее.
+          // Если последняя свеча > currentCandleTime — это баг данных, обрезаем.
+          const filteredData = data.filter(c => c.time <= currentCandleTime);
+          if (filteredData.length === 0) return;
+
+          localCandles = filteredData;
+          localVolumes = buildVolumeData(filteredData);
+          applySelectedPairPriceFormat(filteredData[filteredData.length - 1]?.close);
+          candleSeries.setData(filteredData);
           if (indicatorState.volume && volumeHistogramSeries) volumeHistogramSeries.setData(localVolumes);
           chart.timeScale().fitContent();
           chart.priceScale('right').applyOptions({ autoScale: true });
           requestAnimationFrame(syncPriceScaleWidths);
-          if (data.length) {
-            const last = data[data.length - 1];
-            const now = Math.floor(Date.now() / 1000);
-            const currentCandleTime = now - (now % currentTimeframe);
-            if (last.time >= currentCandleTime) {
-              lastCandle = last;
-            } else {
-              lastCandle = { time: currentCandleTime, open: last.close, high: last.close, low: last.close, close: last.close, volume: 0 };
-              safeUpdateCandle(lastCandle);
-              localCandles.push(lastCandle);
+
+          // ВАЖНО: lastCandle должен ссылаться на объект ВНУТРИ localCandles,
+          // а не на объект из data/rawData. Иначе после следующего setData
+          // lastCandle станет "зависшим" объектом вне массива, и candleSeries.update()
+          // будет обновлять призрачную свечу — что и вызывает "огромную последнюю свечу"
+          // при перезагрузке страницы.
+          const lastHistorical = localCandles[localCandles.length - 1];
+
+          if (lastHistorical.time === currentCandleTime) {
+            // Последняя свеча — текущий временной слот (сервер включил открытую свечу).
+            // Используем её напрямую. Цена придёт через 'price'-сообщение и обновит её.
+            lastCandle = lastHistorical;
+          } else {
+            // Последняя историческая свеча старше текущего слота — создаём stub для текущего слота.
+            // Stub открывается по close предыдущей свечи (gap = 0 или gap = 1 слот).
+            // При gap > 1 слота переподписываемся, чтобы получить свежую историю.
+            const gapSlots = Math.round((currentCandleTime - lastHistorical.time) / currentTimeframe);
+
+            lastCandle = {
+              time: currentCandleTime,
+              open: lastHistorical.close,
+              high: lastHistorical.close,
+              low: lastHistorical.close,
+              close: lastHistorical.close,
+              volume: 0
+            };
+
+            // Добавляем stub в localCandles ПЕРВЫМ — до setData/update —
+            // чтобы lastCandle ссылался на объект внутри массива.
+            localCandles.push(lastCandle);
+            const stubVol = { time: currentCandleTime, value: 0, color: 'rgba(14, 203, 129, 0.5)' };
+            localVolumes.push(stubVol);
+
+            // Обновляем серии новой свечой
+            safeUpdateCandle(lastCandle);
+            if (indicatorState.volume && volumeHistogramSeries) volumeHistogramSeries.update(stubVol);
+
+            if (gapSlots > 1) {
+              // Большой gap — переподписываемся за свежей историей
+              try {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                  socket.send(JSON.stringify({ type: "subscribe", pair: selectedPair, timeframe: currentTimeframe }));
+                }
+              } catch(e) { console.warn('history gap re-subscribe failed', e); }
             }
-            marketPrices[selPairNorm] = lastCandle.close;
-            $('priceDisplay').textContent = formatPrice(lastCandle.close);
-            const askDisplay = $('askPriceDisplay');
-            if (askDisplay) askDisplay.textContent = formatPrice(lastCandle.close);
           }
+
+          marketPrices[selPairNorm] = lastCandle.close;
+          $('priceDisplay').textContent = formatPrice(lastCandle.close);
+          const askDisplay = $('askPriceDisplay');
+          if (askDisplay) askDisplay.textContent = formatPrice(lastCandle.close);
+
           updateIndicators();
           if (historyResolve) { historyResolve(); historyResolve = null; }
           isLoadingHistory = false;
@@ -5817,22 +6672,33 @@
       if (!container) return;
       const maxLevels = Math.max(3, Number(layoutState.maxOrderBookLevels) || 3);
 
-      // Aggregate by price (string-keyed) keeping numeric value
-      const bidMap = new Map(), askMap = new Map();
-      b.forEach(l => { const sz = Number(l.size) || 0; if (sz > 0) bidMap.set(Number(l.price).toFixed(2), sz); });
-      s.forEach(l => { const sz = Number(l.size) || 0; if (sz > 0) askMap.set(Number(l.price).toFixed(2), sz); });
+      const aggregateLevels = (levels) => {
+        const map = new Map();
+        levels.forEach(l => {
+          const price = Number(l.price);
+          const size = Number(l.size) || 0;
+          const key = getOrderBookPriceKey(price);
+          if (!key || size <= 0) return;
+          const existing = map.get(key);
+          if (existing) existing.size += size;
+          else map.set(key, { price: Number(key), size });
+        });
+        return Array.from(map.values());
+      };
+      const bidLevels = aggregateLevels(b);
+      const askLevels = aggregateLevels(s);
 
       // Asks: lowest at top of the asks block, highest at the very top of the visible card.
       // We want asks ordered high → low (descending) so the *best* ask sits just above the spread row.
-      const sortedAsksAsc = Array.from(askMap.entries())
-        .map(([p, sz]) => ({ price: Number(p), size: sz, type: 'ask' }))
+      const sortedAsksAsc = askLevels
+        .map(level => ({ ...level, type: 'ask' }))
         .sort((a, b) => a.price - b.price)
         .slice(0, maxLevels);
       const sortedAsksDesc = [...sortedAsksAsc].reverse();
 
       // Bids: highest at top (right under spread row) → lowest below.
-      const sortedBids = Array.from(bidMap.entries())
-        .map(([p, sz]) => ({ price: Number(p), size: sz, type: 'bid' }))
+      const sortedBids = bidLevels
+        .map(level => ({ ...level, type: 'bid' }))
         .sort((a, b) => b.price - a.price)
         .slice(0, maxLevels);
 
@@ -6339,19 +7205,6 @@
     initPosTabs();
     initOrderTypeSelector();
     setupDoubleTapHandler();
-
-    setProgress(60, "STREAM...");
-    connectWS();
-
-    await Promise.race([new Promise(r => historyResolve = r), new Promise(r => setTimeout(r, 4000))]);
-    setProgress(100, "READY");
-
-    setTimeout(() => { checkResponsiveOverflows(); }, 100);
-
-    setTimeout(() => {
-      loaderEl.classList.add('hidden');
-      setTimeout(() => loaderEl.style.display = 'none', 400);
-    }, 500);
 
   // ========== MARKET DEPTH ==========
 
@@ -6878,6 +7731,20 @@ function renderOrderBook(buys, sells) {
     
 // Инициализация
 initDepthTabs();
+
+    setProgress(60, "STREAM...");
+    connectWS();
+
+    await Promise.race([new Promise(r => historyResolve = r), new Promise(r => setTimeout(r, 4000))]);
+    setProgress(100, "READY");
+
+    setTimeout(() => { checkResponsiveOverflows(); }, 100);
+
+    setTimeout(() => {
+      loaderEl.classList.add('hidden');
+      setTimeout(() => loaderEl.style.display = 'none', 400);
+    }, 500);
+
     scheduleCompactLayoutSync();
 
     // ======================== VAULT SYSTEM ========================
@@ -7071,7 +7938,7 @@ initDepthTabs();
 <div class="vault-modal-overlay" id="vaultModalOverlay">
   <div class="vault-modal" id="vaultModal">
     <div class="vault-modal-header">
-      <div class="vault-modal-title">💰 Liquidity Pool</div>
+      <div class="vault-modal-title">Liquidity Pool</div>
       <button class="vault-modal-close" id="vaultModalClose">×</button>
     </div>
     <div class="vault-modal-content">
